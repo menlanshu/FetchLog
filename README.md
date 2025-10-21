@@ -31,14 +31,14 @@ A powerful WPF-based log file search and collection tool that helps you quickly 
 ## System Requirements
 
 - Windows 10 or later
-- .NET 6.0 Runtime or later
+- .NET 8.0 Runtime or later
 - Visual Studio 2022 (for development)
 
 ## Building the Application
 
 ### Prerequisites
 1. Install [Visual Studio 2022](https://visualstudio.microsoft.com/) with .NET desktop development workload
-2. Install [.NET 6.0 SDK](https://dotnet.microsoft.com/download) or later
+2. Install [.NET 8.0 SDK](https://dotnet.microsoft.com/download) or later
 
 ### Build Instructions
 ```bash
@@ -134,7 +134,7 @@ Recursive: ✅
 ## Technical Details
 
 ### Architecture
-- **Framework**: WPF (.NET 6.0)
+- **Framework**: WPF (.NET 8.0)
 - **Pattern**: MVVM-inspired architecture
 - **Async/Await**: All I/O operations are asynchronous
 - **ZIP Handling**: In-memory processing using System.IO.Compression
