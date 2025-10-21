@@ -7,7 +7,7 @@ A powerful WPF-based log file search and collection tool that helps you quickly 
 ### 🔍 Advanced Search Capabilities
 - **Multiple Directory Search**: Specify one or multiple directories to search simultaneously
 - **Recursive Search**: Option to search through subdirectories
-- **ZIP File Support**: Automatically searches inside ZIP files (in-memory) without extraction
+- **Archive File Support**: Automatically searches inside ZIP and 7z files (in-memory) without extraction
 - **Smart File Detection**: Handles both regular files and compressed archives
 
 ### 🎯 Flexible Filtering
@@ -26,7 +26,7 @@ A powerful WPF-based log file search and collection tool that helps you quickly 
 ### 💾 Configurable Output
 - **Custom Output Location**: Choose where to save search results
 - **Automatic File Organization**: Handles duplicate file names automatically
-- **Complete ZIP Files**: When matches are found in ZIP files, the entire ZIP is copied
+- **Complete Archive Files**: When matches are found in archive files, the entire archive is copied
 
 ## System Requirements
 
@@ -83,7 +83,7 @@ Or open `FetchLog.csproj` in Visual Studio and press F5 to build and run.
 
 ### 3. Search Options
 - ✅ **Search subdirectories recursively**: Enable to search all subdirectories
-- ✅ **Search inside ZIP files (in-memory)**: Enable to search within ZIP archives
+- ✅ **Search inside ZIP and 7z files (in-memory)**: Enable to search within archive files
 - ☐ **Case-sensitive content search**: Enable for case-sensitive text matching
 
 ### 4. Set Output Location
@@ -121,13 +121,13 @@ Content Filter: database
 Recursive: ✅
 ```
 
-### Example 3: Find Logs in ZIP Archives
+### Example 3: Find Logs in Archive Files (ZIP/7z)
 ```
 Directories: D:\Archives
 File Extensions: .log
 Include Patterns: (leave empty)
 Content Filter: ERROR
-Search inside ZIP files: ✅
+Search inside ZIP and 7z files: ✅
 Recursive: ✅
 ```
 
@@ -137,20 +137,20 @@ Recursive: ✅
 - **Framework**: WPF (.NET 8.0)
 - **Pattern**: MVVM-inspired architecture
 - **Async/Await**: All I/O operations are asynchronous
-- **ZIP Handling**: In-memory processing using System.IO.Compression
+- **Archive Handling**: In-memory processing using System.IO.Compression (ZIP) and SharpCompress (7z)
 
 ### File Search Algorithm
 1. Enumerate files in specified directories (recursive or non-recursive)
 2. Apply file extension filter
 3. Apply exclude patterns
 4. Apply include patterns
-5. For ZIP files: search entries in-memory
+5. For archive files (ZIP/7z): search entries in-memory
 6. Apply content filter (text search)
 7. Copy matching files to output directory
 
 ### Performance Considerations
 - Binary file detection to avoid content searching in non-text files
-- In-memory ZIP processing for faster searches
+- In-memory archive processing for faster searches
 - Asynchronous operations for responsive UI
 - Cancellation token support for long-running operations
 
@@ -188,7 +188,7 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 - Multiple directory search support
 - Include/exclude pattern filtering
 - Content-based search
-- ZIP file in-memory search
+- ZIP and 7z file in-memory search
 - Configurable output location
 - Real-time search statistics
 - Recursive search option

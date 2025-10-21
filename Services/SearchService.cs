@@ -8,6 +8,8 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using FetchLog.Models;
+using SharpCompress.Archives;
+using SharpCompress.Common;
 
 namespace FetchLog.Services
 {
@@ -40,13 +42,15 @@ namespace FetchLog.Services
 
                     var fileInfo = new FileInfo(file);
 
-                    // Check if it's a ZIP file
-                    if (options.SearchInZip && fileInfo.Extension.Equals(".zip", StringComparison.OrdinalIgnoreCase))
+                    // Check if it's a ZIP or 7z file
+                    if (options.SearchInZip && (fileInfo.Extension.Equals(".zip", StringComparison.OrdinalIgnoreCase) ||
+                                                 fileInfo.Extension.Equals(".7z", StringComparison.OrdinalIgnoreCase)))
                     {
-                        var zipMatches = await SearchInZipFileAsync(file, options, progress);
-                        if (zipMatches.Any() && !processedZipFiles.Contains(file))
+                        var archiveMatches = await SearchInArchiveFileAsync(file, fileInfo.Extension, options, progress);
+                        if (archiveMatches.Any() && !processedZipFiles.Contains(file))
                         {
-                            // If ZIP contains matches, add the ZIP file itself to results
+                            // If archive contains matches, add the archive file itself to results
+                            var archiveType = fileInfo.Extension.ToUpper().TrimStart('.');
                             results.Add(new SearchResult(
                                 fileInfo.Name,
                                 file,
@@ -55,7 +59,7 @@ namespace FetchLog.Services
                                 file
                             ));
                             processedZipFiles.Add(file);
-                            progress?.Report($"Found matches in ZIP: {fileInfo.Name}");
+                            progress?.Report($"Found matches in {archiveType}: {fileInfo.Name}");
                         }
                     }
                     else
@@ -138,6 +142,31 @@ namespace FetchLog.Services
             }
         }
 
+        private async Task<List<string>> SearchInArchiveFileAsync(string archivePath, string extension, SearchOptions options, IProgress<string>? progress)
+        {
+            var matches = new List<string>();
+
+            try
+            {
+                // Use native ZIP support for .zip files for better performance
+                if (extension.Equals(".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await SearchInZipFileAsync(archivePath, options, progress);
+                }
+                // Use SharpCompress for .7z and other archive formats
+                else if (extension.Equals(".7z", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await SearchIn7zFileAsync(archivePath, options, progress);
+                }
+            }
+            catch (Exception)
+            {
+                // Skip archive files that can't be read
+            }
+
+            return matches;
+        }
+
         private async Task<List<string>> SearchInZipFileAsync(string zipFilePath, SearchOptions options, IProgress<string>? progress)
         {
             var matches = new List<string>();
@@ -216,6 +245,89 @@ namespace FetchLog.Services
             catch (Exception)
             {
                 // Skip ZIP files that can't be read
+            }
+
+            return matches;
+        }
+
+        private async Task<List<string>> SearchIn7zFileAsync(string archivePath, SearchOptions options, IProgress<string>? progress)
+        {
+            var matches = new List<string>();
+
+            try
+            {
+                using (var archive = ArchiveFactory.Open(archivePath))
+                {
+                    foreach (var entry in archive.Entries)
+                    {
+                        _cancellationToken.ThrowIfCancellationRequested();
+
+                        if (entry.IsDirectory) // Skip directories
+                            continue;
+
+                        var entryName = Path.GetFileName(entry.Key);
+
+                        // Check file extension filter
+                        if (options.FileExtensions.Any())
+                        {
+                            var extension = Path.GetExtension(entryName).ToLowerInvariant();
+                            if (!options.FileExtensions.Any(ext => ext.ToLowerInvariant() == extension))
+                            {
+                                continue;
+                            }
+                        }
+
+                        // Check exclude patterns
+                        bool excluded = false;
+                        foreach (var pattern in options.ExcludePatterns)
+                        {
+                            if (IsPatternMatch(entryName, pattern))
+                            {
+                                excluded = true;
+                                break;
+                            }
+                        }
+                        if (excluded) continue;
+
+                        // Check include patterns
+                        if (options.IncludePatterns.Any())
+                        {
+                            bool matchesAny = false;
+                            foreach (var pattern in options.IncludePatterns)
+                            {
+                                if (IsPatternMatch(entryName, pattern))
+                                {
+                                    matchesAny = true;
+                                    break;
+                                }
+                            }
+                            if (!matchesAny) continue;
+                        }
+
+                        // Check content filter
+                        if (!string.IsNullOrWhiteSpace(options.ContentFilter))
+                        {
+                            using (var stream = entry.OpenEntryStream())
+                            using (var reader = new StreamReader(stream))
+                            {
+                                var content = await reader.ReadToEndAsync();
+                                var comparison = options.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+                                if (content.Contains(options.ContentFilter, comparison))
+                                {
+                                    matches.Add(entry.Key);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            matches.Add(entry.Key);
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Skip 7z files that can't be read
             }
 
             return matches;
