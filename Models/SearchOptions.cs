@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace FetchLog.Models
@@ -13,5 +14,16 @@ namespace FetchLog.Models
         public bool SearchInZip { get; set; } = true;
         public bool CaseSensitive { get; set; } = false;
         public string OutputPath { get; set; } = string.Empty;
+
+        // Date/Time range filter
+        public DateTime? DateFrom { get; set; }
+        public DateTime? DateTo { get; set; }
+        public DateFilterMode DateFilterMode { get; set; } = DateFilterMode.LastModified;
+    }
+
+    public enum DateFilterMode
+    {
+        LastModified,
+        Created
     }
 }

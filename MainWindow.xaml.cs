@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Forms;
 using FetchLog.Models;
 using FetchLog.Services;
@@ -136,6 +137,20 @@ namespace FetchLog
                 ContentFilter = txtContentFilter.Text.Trim()
             };
 
+            // Date/time range filter
+            if (chkDateFilter.IsChecked == true)
+            {
+                if (dtpDateFrom.SelectedDate.HasValue)
+                    options.DateFrom = dtpDateFrom.SelectedDate.Value.Date;
+
+                if (dtpDateTo.SelectedDate.HasValue)
+                    options.DateTo = dtpDateTo.SelectedDate.Value.Date.AddDays(1).AddTicks(-1); // end of day
+
+                options.DateFilterMode = cmbDateMode.SelectedIndex == 1
+                    ? DateFilterMode.Created
+                    : DateFilterMode.LastModified;
+            }
+
             // Parse file extensions
             if (!string.IsNullOrWhiteSpace(txtFileExtensions.Text))
             {
@@ -258,6 +273,14 @@ namespace FetchLog
             UpdateStatus("Cancelling search...");
         }
 
+        private void ChkDateFilter_Changed(object sender, RoutedEventArgs e)
+        {
+            bool enabled = chkDateFilter.IsChecked == true;
+            dtpDateFrom.IsEnabled = enabled;
+            dtpDateTo.IsEnabled = enabled;
+            cmbDateMode.IsEnabled = enabled;
+        }
+
         private void SetSearchingState(bool isSearching)
         {
             btnSearch.IsEnabled = !isSearching;
@@ -273,6 +296,13 @@ namespace FetchLog
             chkRecursive.IsEnabled = !isSearching;
             chkSearchInZip.IsEnabled = !isSearching;
             chkCaseSensitive.IsEnabled = !isSearching;
+            chkDateFilter.IsEnabled = !isSearching;
+
+            // Date controls only re-enable if checkbox is checked and not searching
+            bool dateEnabled = !isSearching && (chkDateFilter.IsChecked == true);
+            dtpDateFrom.IsEnabled = dateEnabled;
+            dtpDateTo.IsEnabled = dateEnabled;
+            cmbDateMode.IsEnabled = dateEnabled;
         }
 
         private void UpdateStatus(string message)

@@ -11,8 +11,10 @@ namespace FetchLog.Models
         public long SizeInBytes { get; set; }
         public bool IsInZip { get; set; }
         public string? ZipFilePath { get; set; }
+        public DateTime LastModified { get; set; }
+        public string LastModifiedDisplay => LastModified == default ? "" : LastModified.ToString("yyyy-MM-dd HH:mm:ss");
 
-        public SearchResult(string fileName, string sourcePath, long sizeInBytes, bool isInZip = false, string? zipFilePath = null)
+        public SearchResult(string fileName, string sourcePath, long sizeInBytes, bool isInZip = false, string? zipFilePath = null, DateTime lastModified = default)
         {
             FileName = fileName;
             SourcePath = sourcePath;
@@ -21,6 +23,7 @@ namespace FetchLog.Models
             FileType = isInZip ? "ZIP" : "File";
             IsInZip = isInZip;
             ZipFilePath = zipFilePath;
+            LastModified = lastModified;
         }
 
         private string FormatSize(long bytes)

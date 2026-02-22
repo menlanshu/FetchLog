@@ -56,7 +56,8 @@ namespace FetchLog.Services
                                 file,
                                 fileInfo.Length,
                                 true,
-                                file
+                                file,
+                                fileInfo.LastWriteTime
                             ));
                             processedZipFiles.Add(file);
                             progress?.Report($"Found matches in {archiveType}: {fileInfo.Name}");
@@ -72,7 +73,8 @@ namespace FetchLog.Services
                                 file,
                                 fileInfo.Length,
                                 false,
-                                null
+                                null,
+                                fileInfo.LastWriteTime
                             ));
                             progress?.Report($"Match found: {fileInfo.Name}");
                         }
@@ -95,6 +97,20 @@ namespace FetchLog.Services
                     {
                         return false;
                     }
+                }
+
+                // Check date/time range filter
+                if (options.DateFrom.HasValue || options.DateTo.HasValue)
+                {
+                    var fileDate = options.DateFilterMode == DateFilterMode.Created
+                        ? fileInfo.CreationTime
+                        : fileInfo.LastWriteTime;
+
+                    if (options.DateFrom.HasValue && fileDate < options.DateFrom.Value)
+                        return false;
+
+                    if (options.DateTo.HasValue && fileDate > options.DateTo.Value)
+                        return false;
                 }
 
                 // Check exclude patterns
