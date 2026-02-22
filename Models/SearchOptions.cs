@@ -19,6 +19,10 @@ namespace FetchLog.Models
         public DateTime? DateFrom { get; set; }
         public DateTime? DateTo { get; set; }
         public DateFilterMode DateFilterMode { get; set; } = DateFilterMode.LastModified;
+
+        // File size filter (bytes, null = no limit)
+        public long? MinSizeBytes { get; set; }
+        public long? MaxSizeBytes { get; set; }
     }
 
     public enum DateFilterMode

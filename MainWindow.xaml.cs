@@ -151,6 +151,16 @@ namespace FetchLog
                     : DateFilterMode.LastModified;
             }
 
+            // File size filter
+            if (chkSizeFilter.IsChecked == true)
+            {
+                if (!string.IsNullOrWhiteSpace(txtMinSize.Text) && double.TryParse(txtMinSize.Text, out double minVal))
+                    options.MinSizeBytes = (long)(minVal * GetSizeMultiplier(cmbMinSizeUnit.SelectedIndex));
+
+                if (!string.IsNullOrWhiteSpace(txtMaxSize.Text) && double.TryParse(txtMaxSize.Text, out double maxVal))
+                    options.MaxSizeBytes = (long)(maxVal * GetSizeMultiplier(cmbMaxSizeUnit.SelectedIndex));
+            }
+
             // Parse file extensions
             if (!string.IsNullOrWhiteSpace(txtFileExtensions.Text))
             {
@@ -273,6 +283,24 @@ namespace FetchLog
             UpdateStatus("Cancelling search...");
         }
 
+        private void ChkSizeFilter_Changed(object sender, RoutedEventArgs e)
+        {
+            bool enabled = chkSizeFilter.IsChecked == true;
+            txtMinSize.IsEnabled = enabled;
+            cmbMinSizeUnit.IsEnabled = enabled;
+            txtMaxSize.IsEnabled = enabled;
+            cmbMaxSizeUnit.IsEnabled = enabled;
+        }
+
+        private static long GetSizeMultiplier(int unitIndex) => unitIndex switch
+        {
+            0 => 1L,
+            1 => 1024L,
+            2 => 1024L * 1024,
+            3 => 1024L * 1024 * 1024,
+            _ => 1L
+        };
+
         private void ChkDateFilter_Changed(object sender, RoutedEventArgs e)
         {
             bool enabled = chkDateFilter.IsChecked == true;
@@ -296,9 +324,14 @@ namespace FetchLog
             chkRecursive.IsEnabled = !isSearching;
             chkSearchInZip.IsEnabled = !isSearching;
             chkCaseSensitive.IsEnabled = !isSearching;
-            chkDateFilter.IsEnabled = !isSearching;
+            chkSizeFilter.IsEnabled = !isSearching;
+            bool sizeEnabled = !isSearching && (chkSizeFilter.IsChecked == true);
+            txtMinSize.IsEnabled = sizeEnabled;
+            cmbMinSizeUnit.IsEnabled = sizeEnabled;
+            txtMaxSize.IsEnabled = sizeEnabled;
+            cmbMaxSizeUnit.IsEnabled = sizeEnabled;
 
-            // Date controls only re-enable if checkbox is checked and not searching
+            chkDateFilter.IsEnabled = !isSearching;
             bool dateEnabled = !isSearching && (chkDateFilter.IsChecked == true);
             dtpDateFrom.IsEnabled = dateEnabled;
             dtpDateTo.IsEnabled = dateEnabled;

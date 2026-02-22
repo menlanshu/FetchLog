@@ -113,6 +113,13 @@ namespace FetchLog.Services
                         return false;
                 }
 
+                // Check file size filter
+                if (options.MinSizeBytes.HasValue && fileInfo.Length < options.MinSizeBytes.Value)
+                    return false;
+
+                if (options.MaxSizeBytes.HasValue && fileInfo.Length > options.MaxSizeBytes.Value)
+                    return false;
+
                 // Check exclude patterns
                 if (options.ExcludePatterns.Any())
                 {

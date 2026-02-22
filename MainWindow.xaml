@@ -41,6 +41,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="120"/>
@@ -63,9 +64,46 @@
                 <TextBox Name="txtContentFilter" Grid.Row="3" Grid.Column="1"
                          ToolTip="Search for files containing this text (case-insensitive)"/>
 
-                <!-- Date/Time Range Filter -->
-                <Label Content="Date Range:" Grid.Row="4" Grid.Column="0" VerticalAlignment="Center"/>
+                <!-- File Size Filter -->
+                <Label Content="File Size:" Grid.Row="4" Grid.Column="0" VerticalAlignment="Center"/>
                 <Grid Grid.Row="4" Grid.Column="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="70"/>
+                        <ColumnDefinition Width="65"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="70"/>
+                        <ColumnDefinition Width="65"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <CheckBox Name="chkSizeFilter" Content="Min:" Grid.Column="0"
+                              VerticalAlignment="Center" Margin="0,0,4,0"
+                              Checked="ChkSizeFilter_Changed" Unchecked="ChkSizeFilter_Changed"
+                              ToolTip="Enable file size filtering"/>
+                    <TextBox Name="txtMinSize" Grid.Column="1" IsEnabled="False" Text=""
+                             ToolTip="Minimum file size (leave blank for no minimum)"/>
+                    <ComboBox Name="cmbMinSizeUnit" Grid.Column="2" IsEnabled="False" SelectedIndex="1"
+                              ToolTip="Unit for minimum size">
+                        <ComboBoxItem Content="B"/>
+                        <ComboBoxItem Content="KB"/>
+                        <ComboBoxItem Content="MB"/>
+                        <ComboBoxItem Content="GB"/>
+                    </ComboBox>
+                    <Label Content="Max:" Grid.Column="3" VerticalAlignment="Center" Margin="8,0,4,0"/>
+                    <TextBox Name="txtMaxSize" Grid.Column="4" IsEnabled="False" Text=""
+                             ToolTip="Maximum file size (leave blank for no maximum)"/>
+                    <ComboBox Name="cmbMaxSizeUnit" Grid.Column="5" IsEnabled="False" SelectedIndex="1"
+                              ToolTip="Unit for maximum size">
+                        <ComboBoxItem Content="B"/>
+                        <ComboBoxItem Content="KB"/>
+                        <ComboBoxItem Content="MB"/>
+                        <ComboBoxItem Content="GB"/>
+                    </ComboBox>
+                </Grid>
+
+                <!-- Date/Time Range Filter -->
+                <Label Content="Date Range:" Grid.Row="5" Grid.Column="0" VerticalAlignment="Center"/>
+                <Grid Grid.Row="5" Grid.Column="1">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="150"/>
