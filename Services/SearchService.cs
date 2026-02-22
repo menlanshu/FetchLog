@@ -153,7 +153,7 @@ namespace FetchLog.Services
                 // Check content filter
                 if (!string.IsNullOrWhiteSpace(options.ContentFilter))
                 {
-                    return await ContainsTextAsync(filePath, options.ContentFilter, options.CaseSensitive);
+                    return await ContainsTextAsync(filePath, options.ContentFilter, options.CaseSensitive, options.UseRegex);
                 }
 
                 return true;
@@ -251,11 +251,8 @@ namespace FetchLog.Services
                             using (var reader = new StreamReader(stream))
                             {
                                 var content = await reader.ReadToEndAsync();
-                                var comparison = options.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-                                if (content.Contains(options.ContentFilter, comparison))
-                                {
+                                if (IsContentMatch(content, options.ContentFilter, options.CaseSensitive, options.UseRegex))
                                     matches.Add(entry.FullName);
-                                }
                             }
                         }
                         else
@@ -334,11 +331,8 @@ namespace FetchLog.Services
                             using (var reader = new StreamReader(stream))
                             {
                                 var content = await reader.ReadToEndAsync();
-                                var comparison = options.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-                                if (content.Contains(options.ContentFilter, comparison))
-                                {
+                                if (IsContentMatch(content, options.ContentFilter, options.CaseSensitive, options.UseRegex))
                                     matches.Add(entry.Key);
-                                }
                             }
                         }
                         else
@@ -363,21 +357,36 @@ namespace FetchLog.Services
             return Regex.IsMatch(fileName, regexPattern, RegexOptions.IgnoreCase);
         }
 
-        private async Task<bool> ContainsTextAsync(string filePath, string searchText, bool caseSensitive)
+        private static bool IsContentMatch(string content, string pattern, bool caseSensitive, bool useRegex)
+        {
+            try
+            {
+                if (useRegex)
+                {
+                    var regexOptions = caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase;
+                    return Regex.IsMatch(content, pattern, regexOptions);
+                }
+                var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+                return content.Contains(pattern, comparison);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private async Task<bool> ContainsTextAsync(string filePath, string searchText, bool caseSensitive, bool useRegex)
         {
             try
             {
                 // Only search in text-based files (skip binary files)
                 if (IsBinaryFile(filePath))
-                {
                     return false;
-                }
 
                 using (var reader = new StreamReader(filePath))
                 {
                     var content = await reader.ReadToEndAsync();
-                    var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-                    return content.Contains(searchText, comparison);
+                    return IsContentMatch(content, searchText, caseSensitive, useRegex);
                 }
             }
             catch (Exception)
@@ -463,6 +472,54 @@ namespace FetchLog.Services
             }
 
             return copiedCount;
+        }
+
+        public async Task<(int count, string zipPath)> CompressFilesToZipAsync(List<SearchResult> results, string outputPath, IProgress<string>? progress, CancellationToken cancellationToken)
+        {
+            int count = 0;
+
+            if (!Directory.Exists(outputPath))
+                Directory.CreateDirectory(outputPath);
+
+            var zipPath = Path.Combine(outputPath, $"FetchLog_{DateTime.Now:yyyyMMdd_HHmmss}.zip");
+
+            await Task.Run(() =>
+            {
+                var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+                {
+                    foreach (var result in results)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        try
+                        {
+                            var entryName = result.FileName;
+                            if (existingNames.Contains(entryName))
+                            {
+                                int counter = 1;
+                                var ext = Path.GetExtension(result.FileName);
+                                var nameNoExt = Path.GetFileNameWithoutExtension(result.FileName);
+                                do { entryName = $"{nameNoExt}_{counter++}{ext}"; }
+                                while (existingNames.Contains(entryName));
+                            }
+                            existingNames.Add(entryName);
+
+                            archive.CreateEntryFromFile(result.SourcePath, entryName, CompressionLevel.Optimal);
+                            count++;
+                            progress?.Report($"Compressed: {entryName}");
+                        }
+                        catch (Exception ex)
+                        {
+                            progress?.Report($"Error compressing {result.FileName}: {ex.Message}");
+                        }
+                    }
+                }
+            }, cancellationToken);
+
+            progress?.Report($"Archive created: {Path.GetFileName(zipPath)}");
+            return (count, zipPath);
         }
     }
 }

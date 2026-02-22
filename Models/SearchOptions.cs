@@ -23,6 +23,12 @@ namespace FetchLog.Models
         // File size filter (bytes, null = no limit)
         public long? MinSizeBytes { get; set; }
         public long? MaxSizeBytes { get; set; }
+
+        // Content search options
+        public bool UseRegex { get; set; } = false;
+
+        // Output options
+        public bool CompressOutput { get; set; } = false;
     }
 
     public enum DateFilterMode

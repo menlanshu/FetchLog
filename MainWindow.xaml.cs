@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -20,6 +21,8 @@ namespace FetchLog
         private ObservableCollection<string> _directories;
         private ObservableCollection<SearchResult> _searchResults;
         private SearchService _searchService;
+        private ExportService _exportService;
+        private ProfileService _profileService;
         private CancellationTokenSource? _cancellationTokenSource;
 
         public MainWindow()
@@ -28,6 +31,8 @@ namespace FetchLog
             _directories = new ObservableCollection<string>();
             _searchResults = new ObservableCollection<SearchResult>();
             _searchService = new SearchService();
+            _exportService = new ExportService();
+            _profileService = new ProfileService();
 
             lstDirectories.ItemsSource = _directories;
             lvResults.ItemsSource = _searchResults;
@@ -97,9 +102,7 @@ namespace FetchLog
                 dialog.ShowNewFolderButton = true;
 
                 if (!string.IsNullOrWhiteSpace(txtOutputPath.Text) && Directory.Exists(txtOutputPath.Text))
-                {
                     dialog.SelectedPath = txtOutputPath.Text;
-                }
 
                 if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
                 {
@@ -111,7 +114,6 @@ namespace FetchLog
 
         private async void BtnSearch_Click(object sender, RoutedEventArgs e)
         {
-            // Validate inputs
             if (_directories.Count == 0)
             {
                 MessageBox.Show("Please add at least one directory to search.", "No Directories",
@@ -126,87 +128,34 @@ namespace FetchLog
                 return;
             }
 
-            // Prepare search options
-            var options = new SearchOptions
+            var options = BuildSearchOptions();
+
+            // Validate regex pattern before starting
+            if (options.UseRegex && !string.IsNullOrWhiteSpace(options.ContentFilter))
             {
-                SearchDirectories = _directories.ToList(),
-                Recursive = chkRecursive.IsChecked ?? true,
-                SearchInZip = chkSearchInZip.IsChecked ?? true,
-                CaseSensitive = chkCaseSensitive.IsChecked ?? false,
-                OutputPath = txtOutputPath.Text,
-                ContentFilter = txtContentFilter.Text.Trim()
-            };
-
-            // Date/time range filter
-            if (chkDateFilter.IsChecked == true)
-            {
-                if (dtpDateFrom.SelectedDate.HasValue)
-                    options.DateFrom = dtpDateFrom.SelectedDate.Value.Date;
-
-                if (dtpDateTo.SelectedDate.HasValue)
-                    options.DateTo = dtpDateTo.SelectedDate.Value.Date.AddDays(1).AddTicks(-1); // end of day
-
-                options.DateFilterMode = cmbDateMode.SelectedIndex == 1
-                    ? DateFilterMode.Created
-                    : DateFilterMode.LastModified;
+                try { Regex.IsMatch("", options.ContentFilter); }
+                catch (ArgumentException ex)
+                {
+                    MessageBox.Show($"Invalid regex pattern:\n{ex.Message}", "Regex Error",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
             }
 
-            // File size filter
-            if (chkSizeFilter.IsChecked == true)
-            {
-                if (!string.IsNullOrWhiteSpace(txtMinSize.Text) && double.TryParse(txtMinSize.Text, out double minVal))
-                    options.MinSizeBytes = (long)(minVal * GetSizeMultiplier(cmbMinSizeUnit.SelectedIndex));
-
-                if (!string.IsNullOrWhiteSpace(txtMaxSize.Text) && double.TryParse(txtMaxSize.Text, out double maxVal))
-                    options.MaxSizeBytes = (long)(maxVal * GetSizeMultiplier(cmbMaxSizeUnit.SelectedIndex));
-            }
-
-            // Parse file extensions
-            if (!string.IsNullOrWhiteSpace(txtFileExtensions.Text))
-            {
-                options.FileExtensions = txtFileExtensions.Text
-                    .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(ext => ext.Trim().StartsWith(".") ? ext.Trim() : "." + ext.Trim())
-                    .ToList();
-            }
-
-            // Parse include patterns
-            if (!string.IsNullOrWhiteSpace(txtIncludePatterns.Text))
-            {
-                options.IncludePatterns = txtIncludePatterns.Text
-                    .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(p => p.Trim())
-                    .ToList();
-            }
-
-            // Parse exclude patterns
-            if (!string.IsNullOrWhiteSpace(txtExcludePatterns.Text))
-            {
-                options.ExcludePatterns = txtExcludePatterns.Text
-                    .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(p => p.Trim())
-                    .ToList();
-            }
-
-            // Clear previous results
             _searchResults.Clear();
             txtFilesFound.Text = "0";
             txtFilesCopied.Text = "0";
             txtSearchTime.Text = "0.00s";
+            btnExportResults.IsEnabled = false;
 
-            // Set UI state
             SetSearchingState(true);
-
-            // Create cancellation token
             _cancellationTokenSource = new CancellationTokenSource();
-
             var stopwatch = Stopwatch.StartNew();
 
             try
             {
                 var progress = new Progress<string>(status => UpdateStatus(status));
 
-                // Search for files
                 UpdateStatus("Searching for files...");
                 progressBar.Visibility = Visibility.Visible;
                 progressBar.IsIndeterminate = true;
@@ -225,31 +174,43 @@ namespace FetchLog
                     return;
                 }
 
-                // Copy files to output
-                UpdateStatus("Copying files to output directory...");
-                var copiedCount = await _searchService.CopyFilesToOutputAsync(results, options.OutputPath, progress, _cancellationTokenSource.Token);
+                string outputDetail;
+                int copiedCount;
+
+                if (options.CompressOutput)
+                {
+                    UpdateStatus("Compressing files into ZIP archive...");
+                    var (count, zipPath) = await _searchService.CompressFilesToZipAsync(
+                        results, options.OutputPath, progress, _cancellationTokenSource.Token);
+                    copiedCount = count;
+                    outputDetail = $"Archive: {zipPath}";
+                }
+                else
+                {
+                    UpdateStatus("Copying files to output directory...");
+                    copiedCount = await _searchService.CopyFilesToOutputAsync(
+                        results, options.OutputPath, progress, _cancellationTokenSource.Token);
+                    outputDetail = $"Output folder: {options.OutputPath}";
+                }
 
                 txtFilesCopied.Text = copiedCount.ToString();
 
-                // Update results display
                 foreach (var result in results)
-                {
                     _searchResults.Add(result);
-                }
 
-                UpdateStatus($"Search completed. Found {results.Count} file(s), copied {copiedCount} file(s).");
+                btnExportResults.IsEnabled = true;
 
-                MessageBox.Show($"Search completed successfully!\n\nFiles found: {results.Count}\nFiles copied: {copiedCount}\nTime: {stopwatch.Elapsed.TotalSeconds:F2}s\n\nOutput location: {options.OutputPath}",
+                UpdateStatus($"Search completed. Found {results.Count} file(s), collected {copiedCount} file(s).");
+
+                MessageBox.Show(
+                    $"Search completed successfully!\n\nFiles found: {results.Count}\nFiles collected: {copiedCount}\nTime: {stopwatch.Elapsed.TotalSeconds:F2}s\n\n{outputDetail}",
                     "Search Complete", MessageBoxButton.OK, MessageBoxImage.Information);
 
-                // Ask if user wants to open output folder
                 var openResult = MessageBox.Show("Do you want to open the output folder?", "Open Folder",
                     MessageBoxButton.YesNo, MessageBoxImage.Question);
 
                 if (openResult == MessageBoxResult.Yes)
-                {
                     Process.Start("explorer.exe", options.OutputPath);
-                }
             }
             catch (OperationCanceledException)
             {
@@ -283,13 +244,213 @@ namespace FetchLog
             UpdateStatus("Cancelling search...");
         }
 
-        private void ChkSizeFilter_Changed(object sender, RoutedEventArgs e)
+        // ── Export Results (#4) ──────────────────────────────────────────────
+
+        private async void BtnExportResults_Click(object sender, RoutedEventArgs e)
         {
-            bool enabled = chkSizeFilter.IsChecked == true;
-            txtMinSize.IsEnabled = enabled;
-            cmbMinSizeUnit.IsEnabled = enabled;
-            txtMaxSize.IsEnabled = enabled;
-            cmbMaxSizeUnit.IsEnabled = enabled;
+            if (_searchResults.Count == 0)
+            {
+                MessageBox.Show("No results to export.", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            using (var dialog = new SaveFileDialog())
+            {
+                dialog.Filter = "CSV file (*.csv)|*.csv|HTML file (*.html)|*.html";
+                dialog.FileName = $"FetchLog_Results_{DateTime.Now:yyyyMMdd_HHmmss}";
+                dialog.Title = "Export Search Results";
+
+                if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                {
+                    try
+                    {
+                        var results = _searchResults.ToList();
+                        if (dialog.FilterIndex == 1)
+                            await _exportService.ExportToCsvAsync(results, dialog.FileName);
+                        else
+                            await _exportService.ExportToHtmlAsync(results, dialog.FileName);
+
+                        UpdateStatus($"Results exported to: {dialog.FileName}");
+
+                        var openResult = MessageBox.Show("Results exported successfully!\n\nOpen the exported file?",
+                            "Export Complete", MessageBoxButton.YesNo, MessageBoxImage.Information);
+
+                        if (openResult == MessageBoxResult.Yes)
+                            Process.Start(new ProcessStartInfo(dialog.FileName) { UseShellExecute = true });
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Export failed:\n{ex.Message}", "Export Error",
+                            MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                }
+            }
+        }
+
+        // ── Search Profiles (#5) ─────────────────────────────────────────────
+
+        private async void BtnSaveProfile_Click(object sender, RoutedEventArgs e)
+        {
+            using (var dialog = new SaveFileDialog())
+            {
+                dialog.Filter = "FetchLog Profile (*.json)|*.json";
+                dialog.InitialDirectory = _profileService.ProfilesDirectory;
+                dialog.Title = "Save Search Profile";
+                dialog.FileName = "MyProfile";
+
+                if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                {
+                    try
+                    {
+                        await _profileService.SaveAsync(BuildSearchOptions(), dialog.FileName);
+                        UpdateStatus($"Profile saved: {Path.GetFileName(dialog.FileName)}");
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Failed to save profile:\n{ex.Message}", "Save Error",
+                            MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                }
+            }
+        }
+
+        private async void BtnLoadProfile_Click(object sender, RoutedEventArgs e)
+        {
+            using (var dialog = new OpenFileDialog())
+            {
+                dialog.Filter = "FetchLog Profile (*.json)|*.json";
+                dialog.InitialDirectory = _profileService.ProfilesDirectory;
+                dialog.Title = "Load Search Profile";
+
+                if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                {
+                    try
+                    {
+                        var options = await _profileService.LoadAsync(dialog.FileName);
+                        if (options != null)
+                        {
+                            ApplyOptionsToUI(options);
+                            UpdateStatus($"Profile loaded: {Path.GetFileName(dialog.FileName)}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Failed to load profile:\n{ex.Message}", "Load Error",
+                            MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                }
+            }
+        }
+
+        // ── Helpers ──────────────────────────────────────────────────────────
+
+        private SearchOptions BuildSearchOptions()
+        {
+            var options = new SearchOptions
+            {
+                SearchDirectories = _directories.ToList(),
+                Recursive = chkRecursive.IsChecked ?? true,
+                SearchInZip = chkSearchInZip.IsChecked ?? true,
+                CaseSensitive = chkCaseSensitive.IsChecked ?? false,
+                UseRegex = chkUseRegex.IsChecked ?? false,
+                CompressOutput = chkCompressOutput.IsChecked ?? false,
+                OutputPath = txtOutputPath.Text,
+                ContentFilter = txtContentFilter.Text.Trim()
+            };
+
+            // Date/time range filter
+            if (chkDateFilter.IsChecked == true)
+            {
+                if (dtpDateFrom.SelectedDate.HasValue)
+                    options.DateFrom = dtpDateFrom.SelectedDate.Value.Date;
+
+                if (dtpDateTo.SelectedDate.HasValue)
+                    options.DateTo = dtpDateTo.SelectedDate.Value.Date.AddDays(1).AddTicks(-1);
+
+                options.DateFilterMode = cmbDateMode.SelectedIndex == 1
+                    ? DateFilterMode.Created
+                    : DateFilterMode.LastModified;
+            }
+
+            // File size filter
+            if (chkSizeFilter.IsChecked == true)
+            {
+                if (!string.IsNullOrWhiteSpace(txtMinSize.Text) && double.TryParse(txtMinSize.Text, out double minVal))
+                    options.MinSizeBytes = (long)(minVal * GetSizeMultiplier(cmbMinSizeUnit.SelectedIndex));
+
+                if (!string.IsNullOrWhiteSpace(txtMaxSize.Text) && double.TryParse(txtMaxSize.Text, out double maxVal))
+                    options.MaxSizeBytes = (long)(maxVal * GetSizeMultiplier(cmbMaxSizeUnit.SelectedIndex));
+            }
+
+            if (!string.IsNullOrWhiteSpace(txtFileExtensions.Text))
+                options.FileExtensions = txtFileExtensions.Text
+                    .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(ext => ext.Trim().StartsWith(".") ? ext.Trim() : "." + ext.Trim())
+                    .ToList();
+
+            if (!string.IsNullOrWhiteSpace(txtIncludePatterns.Text))
+                options.IncludePatterns = txtIncludePatterns.Text
+                    .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(p => p.Trim()).ToList();
+
+            if (!string.IsNullOrWhiteSpace(txtExcludePatterns.Text))
+                options.ExcludePatterns = txtExcludePatterns.Text
+                    .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(p => p.Trim()).ToList();
+
+            return options;
+        }
+
+        private void ApplyOptionsToUI(SearchOptions options)
+        {
+            _directories.Clear();
+            foreach (var dir in options.SearchDirectories)
+                _directories.Add(dir);
+
+            txtFileExtensions.Text = string.Join(", ", options.FileExtensions);
+            txtIncludePatterns.Text = string.Join(", ", options.IncludePatterns);
+            txtExcludePatterns.Text = string.Join(", ", options.ExcludePatterns);
+            txtContentFilter.Text = options.ContentFilter;
+
+            if (!string.IsNullOrWhiteSpace(options.OutputPath))
+                txtOutputPath.Text = options.OutputPath;
+
+            chkRecursive.IsChecked = options.Recursive;
+            chkSearchInZip.IsChecked = options.SearchInZip;
+            chkCaseSensitive.IsChecked = options.CaseSensitive;
+            chkUseRegex.IsChecked = options.UseRegex;
+            chkCompressOutput.IsChecked = options.CompressOutput;
+
+            // Date range
+            bool hasDate = options.DateFrom.HasValue || options.DateTo.HasValue;
+            chkDateFilter.IsChecked = hasDate;
+            dtpDateFrom.SelectedDate = options.DateFrom;
+            dtpDateTo.SelectedDate = options.DateTo;
+            cmbDateMode.SelectedIndex = options.DateFilterMode == DateFilterMode.Created ? 1 : 0;
+
+            // Size filter
+            bool hasSize = options.MinSizeBytes.HasValue || options.MaxSizeBytes.HasValue;
+            chkSizeFilter.IsChecked = hasSize;
+            if (options.MinSizeBytes.HasValue)
+            {
+                var (val, unit) = BytesToDisplayUnit(options.MinSizeBytes.Value);
+                txtMinSize.Text = $"{val:0.##}";
+                cmbMinSizeUnit.SelectedIndex = unit;
+            }
+            if (options.MaxSizeBytes.HasValue)
+            {
+                var (val, unit) = BytesToDisplayUnit(options.MaxSizeBytes.Value);
+                txtMaxSize.Text = $"{val:0.##}";
+                cmbMaxSizeUnit.SelectedIndex = unit;
+            }
+        }
+
+        private static (double value, int unitIndex) BytesToDisplayUnit(long bytes)
+        {
+            if (bytes >= 1024L * 1024 * 1024) return (bytes / (1024.0 * 1024 * 1024), 3);
+            if (bytes >= 1024L * 1024)         return (bytes / (1024.0 * 1024), 2);
+            if (bytes >= 1024L)                 return (bytes / 1024.0, 1);
+            return (bytes, 0);
         }
 
         private static long GetSizeMultiplier(int unitIndex) => unitIndex switch
@@ -300,6 +461,15 @@ namespace FetchLog
             3 => 1024L * 1024 * 1024,
             _ => 1L
         };
+
+        private void ChkSizeFilter_Changed(object sender, RoutedEventArgs e)
+        {
+            bool enabled = chkSizeFilter.IsChecked == true;
+            txtMinSize.IsEnabled = enabled;
+            cmbMinSizeUnit.IsEnabled = enabled;
+            txtMaxSize.IsEnabled = enabled;
+            cmbMaxSizeUnit.IsEnabled = enabled;
+        }
 
         private void ChkDateFilter_Changed(object sender, RoutedEventArgs e)
         {
@@ -324,6 +494,12 @@ namespace FetchLog
             chkRecursive.IsEnabled = !isSearching;
             chkSearchInZip.IsEnabled = !isSearching;
             chkCaseSensitive.IsEnabled = !isSearching;
+            chkUseRegex.IsEnabled = !isSearching;
+            chkCompressOutput.IsEnabled = !isSearching;
+            btnSaveProfile.IsEnabled = !isSearching;
+            btnLoadProfile.IsEnabled = !isSearching;
+            if (isSearching) btnExportResults.IsEnabled = false;
+
             chkSizeFilter.IsEnabled = !isSearching;
             bool sizeEnabled = !isSearching && (chkSizeFilter.IsChecked == true);
             txtMinSize.IsEnabled = sizeEnabled;

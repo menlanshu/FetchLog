@@ -1,7 +1,7 @@
 <Window x:Class="FetchLog.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="FetchLog - Log File Search Tool" Height="850" Width="900"
+        Title="FetchLog - Log File Search Tool" Height="970" Width="900"
         WindowStartupLocation="CenterScreen">
     <Grid Margin="10">
         <Grid.RowDefinitions>
@@ -62,7 +62,7 @@
 
                 <Label Content="Content Filter:" Grid.Row="3" Grid.Column="0"/>
                 <TextBox Name="txtContentFilter" Grid.Row="3" Grid.Column="1"
-                         ToolTip="Search for files containing this text (case-insensitive)"/>
+                         ToolTip="Search for files containing this text or regex pattern"/>
 
                 <!-- File Size Filter -->
                 <Label Content="File Size:" Grid.Row="4" Grid.Column="0" VerticalAlignment="Center"/>
@@ -137,18 +137,34 @@
                 <CheckBox Name="chkRecursive" Content="Search subdirectories recursively" IsChecked="True"/>
                 <CheckBox Name="chkSearchInZip" Content="Search inside ZIP and 7z files (in-memory)" IsChecked="True"/>
                 <CheckBox Name="chkCaseSensitive" Content="Case-sensitive content search" IsChecked="False"/>
+                <CheckBox Name="chkUseRegex" Content="Use regular expression (regex) for content search" IsChecked="False"
+                          ToolTip="Treat the Content Filter as a .NET regex pattern (e.g. ERROR\s+\d{4}-\d{2}-\d{2})"/>
+                <CheckBox Name="chkCompressOutput" Content="Compress collected files into a ZIP archive" IsChecked="False"
+                          ToolTip="Bundle all matched files into a timestamped ZIP in the output folder instead of copying individually"/>
             </StackPanel>
         </GroupBox>
 
         <!-- Output Location Section -->
         <GroupBox Header="Output Location" Grid.Row="3" Padding="10" Margin="0,0,0,10">
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox Name="txtOutputPath" Grid.Column="0" IsReadOnly="True"/>
-                <Button Name="btnBrowseOutput" Content="Browse..." Grid.Column="1" Click="BtnBrowseOutput_Click"/>
+                <TextBox Name="txtOutputPath" Grid.Row="0" Grid.Column="0" IsReadOnly="True"/>
+                <Button Name="btnBrowseOutput" Content="Browse..." Grid.Row="0" Grid.Column="1" Click="BtnBrowseOutput_Click"/>
+                <!-- Search Profiles -->
+                <StackPanel Orientation="Horizontal" Grid.Row="1" Grid.ColumnSpan="2" Margin="0,6,0,0">
+                    <Label Content="Profiles:" VerticalAlignment="Center" Padding="0,4,6,4"/>
+                    <Button Name="btnSaveProfile" Content="Save Profile" Width="100" Click="BtnSaveProfile_Click"
+                            ToolTip="Save current search settings to a reusable profile file"/>
+                    <Button Name="btnLoadProfile" Content="Load Profile" Width="100" Click="BtnLoadProfile_Click"
+                            Margin="5,0,0,0" ToolTip="Load a previously saved profile to restore all settings"/>
+                </StackPanel>
             </Grid>
         </GroupBox>
 
@@ -158,6 +174,9 @@
                     FontWeight="Bold" Background="#FF4CAF50" Foreground="White"/>
             <Button Name="btnCancel" Content="Cancel" Click="BtnCancel_Click" Width="120" Height="35"
                     IsEnabled="False"/>
+            <Button Name="btnExportResults" Content="Export Results" Click="BtnExportResults_Click" Width="120" Height="35"
+                    IsEnabled="False" Margin="10,0,0,0"
+                    ToolTip="Export the current results list to CSV or HTML"/>
         </StackPanel>
 
         <!-- Statistics Section -->
