@@ -247,6 +247,10 @@ namespace FetchLog
             txtPreview.Text = "";
             txtPreviewHeader.Text = "Select a file to preview its content";
 
+            // Apply current grouping now so new items are automatically grouped
+            // as they stream in during incremental search (#17 + #21)
+            ApplyGrouping(cmbGroupBy.SelectedIndex);
+
             SetSearchingState(true);
             _cancellationTokenSource = new CancellationTokenSource();
             var stopwatch = Stopwatch.StartNew();
@@ -259,7 +263,19 @@ namespace FetchLog
                 progressBar.Visibility = Visibility.Visible;
                 progressBar.IsIndeterminate = true;
 
-                var results = await _searchService.SearchFilesAsync(options, progress, _cancellationTokenSource.Token);
+                // Incremental results callback (#21) — adds each result to the list as it is found.
+                // Since SearchFilesAsync runs in the UI thread's async context, this is safe without
+                // an explicit Dispatcher call.
+                Action<SearchResult>? resultCallback = options.EnableIncrementalDisplay
+                    ? (r) =>
+                    {
+                        _searchResults.Add(r);
+                        txtFilesFound.Text = _searchResults.Count.ToString();
+                    }
+                    : null;
+
+                var results = await _searchService.SearchFilesAsync(
+                    options, progress, _cancellationTokenSource.Token, resultCallback);
 
                 stopwatch.Stop();
                 txtSearchTime.Text = $"{stopwatch.Elapsed.TotalSeconds:F2}s";
@@ -271,6 +287,29 @@ namespace FetchLog
                     MessageBox.Show("No files found matching the search criteria.", "Search Complete",
                         MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
+                }
+
+                // Populate results list (if not already done by incremental callback)
+                if (!options.EnableIncrementalDisplay)
+                {
+                    foreach (var r in results) _searchResults.Add(r);
+                    ApplyGrouping(cmbGroupBy.SelectedIndex);
+                }
+
+                // Duplicate detection (#19)
+                if (options.DetectDuplicates && results.Any(r => !r.IsInZip))
+                {
+                    UpdateStatus("Detecting duplicate files...");
+                    await SearchService.MarkDuplicatesAsync(results);
+
+                    // Refresh display so duplicate highlight triggers
+                    _searchResults.Clear();
+                    foreach (var r in results) _searchResults.Add(r);
+                    ApplyGrouping(cmbGroupBy.SelectedIndex);
+
+                    int dupCount = results.Count(r => r.IsDuplicate);
+                    if (dupCount > 0)
+                        UpdateStatus($"Found {dupCount} duplicate file(s) (highlighted in orange).");
                 }
 
                 string outputDetail;
@@ -293,14 +332,6 @@ namespace FetchLog
                 }
 
                 txtFilesCopied.Text = copiedCount.ToString();
-
-                foreach (var result in results)
-                    _searchResults.Add(result);
-
-                // Re-apply current grouping to the new results (#17)
-                ApplyGrouping(cmbGroupBy.SelectedIndex);
-
-                btnExportResults.IsEnabled = true;
 
                 // Save to history (#12)
                 await _historyService.AddAsync(options, results.Count);
@@ -624,7 +655,11 @@ namespace FetchLog
                 CompressOutput = chkCompressOutput.IsChecked ?? false,
                 PreserveStructure = chkPreserveStructure.IsChecked ?? false,
                 OutputPath = txtOutputPath.Text,
-                ContentFilter = txtContentFilter.Text.Trim()
+                ContentFilter = txtContentFilter.Text.Trim(),
+                EnableIncrementalDisplay = chkIncrementalSearch.IsChecked ?? true,
+                DetectDuplicates = chkDetectDuplicates.IsChecked ?? false,
+                ShowFileHash = chkShowFileHash.IsChecked ?? false,
+                DetectLogFormat = chkDetectLogFormat.IsChecked ?? false,
             };
 
             if (!string.IsNullOrWhiteSpace(txtMinMatchCount.Text) &&
@@ -708,6 +743,10 @@ namespace FetchLog
             chkMultilineSearch.IsChecked = options.MultilineSearch;
             chkCompressOutput.IsChecked = options.CompressOutput;
             chkPreserveStructure.IsChecked = options.PreserveStructure;
+            chkIncrementalSearch.IsChecked = options.EnableIncrementalDisplay;
+            chkDetectDuplicates.IsChecked = options.DetectDuplicates;
+            chkShowFileHash.IsChecked = options.ShowFileHash;
+            chkDetectLogFormat.IsChecked = options.DetectLogFormat;
 
             bool hasDate = options.DateFrom.HasValue || options.DateTo.HasValue;
             chkDateFilter.IsChecked = hasDate;
@@ -834,6 +873,11 @@ namespace FetchLog
             cmbFavorites.IsEnabled = !isSearching;
 
             if (isSearching) btnExportResults.IsEnabled = false;
+
+            chkIncrementalSearch.IsEnabled = !isSearching;
+            chkDetectDuplicates.IsEnabled = !isSearching;
+            chkShowFileHash.IsEnabled = !isSearching;
+            chkDetectLogFormat.IsEnabled = !isSearching;
 
             chkSizeFilter.IsEnabled = !isSearching;
             bool sizeEnabled = !isSearching && (chkSizeFilter.IsChecked == true);

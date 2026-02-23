@@ -217,7 +217,8 @@
         <GroupBox Header="Search Options" Grid.Row="2" Padding="10" Margin="0,0,0,10">
             <WrapPanel Orientation="Horizontal">
                 <CheckBox Name="chkRecursive" Content="Search subdirectories recursively" IsChecked="True" Margin="0,0,16,2"/>
-                <CheckBox Name="chkSearchInZip" Content="Search inside ZIP and 7z files" IsChecked="True" Margin="0,0,16,2"/>
+                <CheckBox Name="chkSearchInZip" Content="Search inside ZIP, 7z, TAR &amp; RAR files" IsChecked="True" Margin="0,0,16,2"
+                          ToolTip="Search inside ZIP, 7z, TAR, TAR.GZ, TAR.BZ2 and RAR archives (#18)"/>
                 <CheckBox Name="chkCaseSensitive" Content="Case-sensitive content search" IsChecked="False" Margin="0,0,16,2"/>
                 <CheckBox Name="chkUseRegex" Content="Use regex for content search" IsChecked="False" Margin="0,0,16,2"
                           ToolTip="Treat the Content Filter as a .NET regex pattern (e.g. ERROR\s+\d{4}-\d{2}-\d{2})"/>
@@ -227,6 +228,14 @@
                           ToolTip="Bundle all matched files into a timestamped ZIP in the output folder"/>
                 <CheckBox Name="chkPreserveStructure" Content="Preserve directory structure in output" IsChecked="False"
                           ToolTip="Mirror the original folder hierarchy under the output directory"/>
+                <CheckBox Name="chkIncrementalSearch" Content="Show results as found" IsChecked="True" Margin="0,0,16,2"
+                          ToolTip="Stream each result to the list immediately as it is found (#21)"/>
+                <CheckBox Name="chkDetectDuplicates" Content="Detect duplicate files" IsChecked="False" Margin="0,0,16,2"
+                          ToolTip="After search, identify files with identical content (MD5 hash). Duplicates are highlighted in orange. (#19)"/>
+                <CheckBox Name="chkShowFileHash" Content="Show MD5 hash" IsChecked="False" Margin="0,0,16,2"
+                          ToolTip="Compute and display the MD5 checksum of each found file in the Hash column (#20)"/>
+                <CheckBox Name="chkDetectLogFormat" Content="Detect log format" IsChecked="False"
+                          ToolTip="Classify each file as Apache, Syslog, Log4j, JSON, CSV, etc. and show in the Format column (#22)"/>
             </WrapPanel>
         </GroupBox>
 
@@ -319,6 +328,18 @@
                 <!-- Results list with match columns -->
                 <ListView Name="lvResults" Grid.Row="1"
                           SelectionChanged="LvResults_SelectionChanged">
+                    <!-- Highlight duplicate files in light orange (#19) -->
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsDuplicate}" Value="True">
+                                    <Setter Property="Background" Value="#FFF3E0"/>
+                                    <Setter Property="ToolTip"
+                                            Value="{Binding DuplicateOf, StringFormat='Duplicate of: {0}'}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ListView.ItemContainerStyle>
                     <ListView.GroupStyle>
                         <GroupStyle>
                             <GroupStyle.HeaderTemplate>
@@ -332,13 +353,15 @@
                     </ListView.GroupStyle>
                     <ListView.View>
                         <GridView>
-                            <GridViewColumn Header="File Name"     Width="155" DisplayMemberBinding="{Binding FileName}"/>
-                            <GridViewColumn Header="Source Path"   Width="200" DisplayMemberBinding="{Binding SourcePath}"/>
-                            <GridViewColumn Header="Size"          Width="68"  DisplayMemberBinding="{Binding Size}"/>
-                            <GridViewColumn Header="Type"          Width="48"  DisplayMemberBinding="{Binding FileType}"/>
-                            <GridViewColumn Header="Modified"      Width="130" DisplayMemberBinding="{Binding LastModifiedDisplay}"/>
-                            <GridViewColumn Header="Matches"       Width="58"  DisplayMemberBinding="{Binding MatchCountDisplay}"/>
-                            <GridViewColumn Header="First Line"    Width="68"  DisplayMemberBinding="{Binding FirstMatchLineDisplay}"/>
+                            <GridViewColumn Header="File Name"   Width="148" DisplayMemberBinding="{Binding FileName}"/>
+                            <GridViewColumn Header="Source Path" Width="192" DisplayMemberBinding="{Binding SourcePath}"/>
+                            <GridViewColumn Header="Size"        Width="64"  DisplayMemberBinding="{Binding Size}"/>
+                            <GridViewColumn Header="Type"        Width="52"  DisplayMemberBinding="{Binding FileType}"/>
+                            <GridViewColumn Header="Modified"    Width="125" DisplayMemberBinding="{Binding LastModifiedDisplay}"/>
+                            <GridViewColumn Header="Matches"     Width="55"  DisplayMemberBinding="{Binding MatchCountDisplay}"/>
+                            <GridViewColumn Header="Line"        Width="40"  DisplayMemberBinding="{Binding FirstMatchLineDisplay}"/>
+                            <GridViewColumn Header="Hash (MD5)"  Width="78"  DisplayMemberBinding="{Binding Md5HashShort}"/>
+                            <GridViewColumn Header="Format"      Width="70"  DisplayMemberBinding="{Binding LogFormat}"/>
                         </GridView>
                     </ListView.View>
                 </ListView>

@@ -40,6 +40,18 @@ namespace FetchLog.Models
         // Rename on copy (#16)
         public string RenamePrefix { get; set; } = string.Empty;
         public string RenameSuffix { get; set; } = string.Empty;
+
+        // Incremental display (#21) — stream results to the list as files are found
+        public bool EnableIncrementalDisplay { get; set; } = true;
+
+        // Duplicate detection (#19) — mark files with identical content after search
+        public bool DetectDuplicates { get; set; } = false;
+
+        // File hash (#20) — compute and display MD5 hash for each result
+        public bool ShowFileHash { get; set; } = false;
+
+        // Log format auto-detection (#22) — classify log files by format
+        public bool DetectLogFormat { get; set; } = false;
     }
 
     public enum DateFilterMode

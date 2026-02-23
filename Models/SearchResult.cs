@@ -34,6 +34,17 @@ namespace FetchLog.Models
         }
         public string MonthGroup => LastModified == default ? "Unknown" : LastModified.ToString("yyyy-MM");
 
+        // Duplicate detection (#19)
+        public bool IsDuplicate { get; set; }
+        public string? DuplicateOf { get; set; }
+
+        // File hash (#20)
+        public string? Md5Hash { get; set; }
+        public string Md5HashShort => Md5Hash is { Length: > 0 } h ? h[..8] + "…" : "";
+
+        // Log format auto-detection (#22)
+        public string LogFormat { get; set; } = "";
+
         public SearchResult(string fileName, string sourcePath, long sizeInBytes, bool isInZip = false,
             string? zipFilePath = null, DateTime lastModified = default, string searchRootDirectory = "",
             int matchCount = 0, int firstMatchLine = 0, string matchSnippet = "")
