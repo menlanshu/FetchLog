@@ -26,6 +26,8 @@ namespace FetchLog.Models
 
         // Content search options
         public bool UseRegex { get; set; } = false;
+        public bool MultilineSearch { get; set; } = false;  // regex: dot matches newline
+        public int? MinMatchCount { get; set; }             // minimum content matches required
 
         // Output options
         public bool CompressOutput { get; set; } = false;

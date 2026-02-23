@@ -15,8 +15,16 @@ namespace FetchLog.Models
         public string LastModifiedDisplay => LastModified == default ? "" : LastModified.ToString("yyyy-MM-dd HH:mm:ss");
         // The search root directory this file was found under (used for structure preservation)
         public string SearchRootDirectory { get; set; } = string.Empty;
+        // Content match details (#9)
+        public int MatchCount { get; set; }
+        public int FirstMatchLine { get; set; }
+        public string MatchSnippet { get; set; } = string.Empty;
+        public string MatchCountDisplay => MatchCount > 0 ? MatchCount.ToString() : "";
+        public string FirstMatchLineDisplay => FirstMatchLine > 0 ? $"L{FirstMatchLine}" : "";
 
-        public SearchResult(string fileName, string sourcePath, long sizeInBytes, bool isInZip = false, string? zipFilePath = null, DateTime lastModified = default, string searchRootDirectory = "")
+        public SearchResult(string fileName, string sourcePath, long sizeInBytes, bool isInZip = false,
+            string? zipFilePath = null, DateTime lastModified = default, string searchRootDirectory = "",
+            int matchCount = 0, int firstMatchLine = 0, string matchSnippet = "")
         {
             FileName = fileName;
             SourcePath = sourcePath;
@@ -27,6 +35,9 @@ namespace FetchLog.Models
             ZipFilePath = zipFilePath;
             LastModified = lastModified;
             SearchRootDirectory = searchRootDirectory;
+            MatchCount = matchCount;
+            FirstMatchLine = firstMatchLine;
+            MatchSnippet = matchSnippet;
         }
 
         private string FormatSize(long bytes)

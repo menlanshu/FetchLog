@@ -42,23 +42,19 @@ namespace FetchLog.Services
 
                     var fileInfo = new FileInfo(file);
 
-                    // Check if it's a ZIP or 7z file
+                    // Check if it's a ZIP or 7z archive
                     if (options.SearchInZip && (fileInfo.Extension.Equals(".zip", StringComparison.OrdinalIgnoreCase) ||
                                                  fileInfo.Extension.Equals(".7z", StringComparison.OrdinalIgnoreCase)))
                     {
                         var archiveMatches = await SearchInArchiveFileAsync(file, fileInfo.Extension, options, progress);
                         if (archiveMatches.Any() && !processedZipFiles.Contains(file))
                         {
-                            // If archive contains matches, add the archive file itself to results
                             var archiveType = fileInfo.Extension.ToUpper().TrimStart('.');
                             results.Add(new SearchResult(
-                                fileInfo.Name,
-                                file,
-                                fileInfo.Length,
-                                true,
-                                file,
-                                fileInfo.LastWriteTime,
-                                directory
+                                fileInfo.Name, file, fileInfo.Length, true, file,
+                                fileInfo.LastWriteTime, directory,
+                                matchCount: archiveMatches.Count,
+                                matchSnippet: $"{archiveMatches.Count} matching entr{(archiveMatches.Count == 1 ? "y" : "ies")}"
                             ));
                             processedZipFiles.Add(file);
                             progress?.Report($"Found matches in {archiveType}: {fileInfo.Name}");
@@ -66,20 +62,30 @@ namespace FetchLog.Services
                     }
                     else
                     {
-                        // Regular file search
-                        if (await IsFileMatchAsync(file, fileInfo, options))
+                        // Regular file: check structural filters first, then content
+                        if (!PassesStructuralFilters(fileInfo, options))
+                            continue;
+
+                        MatchInfo matchInfo;
+                        if (!string.IsNullOrWhiteSpace(options.ContentFilter))
                         {
-                            results.Add(new SearchResult(
-                                fileInfo.Name,
-                                file,
-                                fileInfo.Length,
-                                false,
-                                null,
-                                fileInfo.LastWriteTime,
-                                directory
-                            ));
-                            progress?.Report($"Match found: {fileInfo.Name}");
+                            var info = await GetMatchInfoAsync(file, options.ContentFilter,
+                                options.CaseSensitive, options.UseRegex, options.MultilineSearch);
+                            if (info == null) continue;
+                            if (options.MinMatchCount.HasValue && info.MatchCount < options.MinMatchCount.Value) continue;
+                            matchInfo = info;
                         }
+                        else
+                        {
+                            matchInfo = new MatchInfo(0, 0, "");
+                        }
+
+                        results.Add(new SearchResult(
+                            fileInfo.Name, file, fileInfo.Length, false, null,
+                            fileInfo.LastWriteTime, directory,
+                            matchInfo.MatchCount, matchInfo.FirstMatchLine, matchInfo.Snippet
+                        ));
+                        progress?.Report($"Match found: {fileInfo.Name}");
                     }
                 }
             }
@@ -87,84 +93,93 @@ namespace FetchLog.Services
             return results;
         }
 
-        private async Task<bool> IsFileMatchAsync(string filePath, FileInfo fileInfo, SearchOptions options)
+        private record MatchInfo(int MatchCount, int FirstMatchLine, string Snippet);
+
+        /// <summary>Extension, date, size, and filename pattern checks — no I/O beyond FileInfo.</summary>
+        private bool PassesStructuralFilters(FileInfo fileInfo, SearchOptions options)
         {
             try
             {
-                // Check file extension filter
                 if (options.FileExtensions.Any())
                 {
-                    var extension = fileInfo.Extension.ToLowerInvariant();
-                    if (!options.FileExtensions.Any(ext => ext.ToLowerInvariant() == extension))
-                    {
+                    var ext = fileInfo.Extension.ToLowerInvariant();
+                    if (!options.FileExtensions.Any(e => e.ToLowerInvariant() == ext))
                         return false;
-                    }
                 }
 
-                // Check date/time range filter
                 if (options.DateFrom.HasValue || options.DateTo.HasValue)
                 {
                     var fileDate = options.DateFilterMode == DateFilterMode.Created
-                        ? fileInfo.CreationTime
-                        : fileInfo.LastWriteTime;
-
-                    if (options.DateFrom.HasValue && fileDate < options.DateFrom.Value)
-                        return false;
-
-                    if (options.DateTo.HasValue && fileDate > options.DateTo.Value)
-                        return false;
+                        ? fileInfo.CreationTime : fileInfo.LastWriteTime;
+                    if (options.DateFrom.HasValue && fileDate < options.DateFrom.Value) return false;
+                    if (options.DateTo.HasValue   && fileDate > options.DateTo.Value)   return false;
                 }
 
-                // Check file size filter
-                if (options.MinSizeBytes.HasValue && fileInfo.Length < options.MinSizeBytes.Value)
+                if (options.MinSizeBytes.HasValue && fileInfo.Length < options.MinSizeBytes.Value) return false;
+                if (options.MaxSizeBytes.HasValue && fileInfo.Length > options.MaxSizeBytes.Value) return false;
+
+                if (options.ExcludePatterns.Any(p => IsPatternMatch(fileInfo.Name, p))) return false;
+
+                if (options.IncludePatterns.Any() && !options.IncludePatterns.Any(p => IsPatternMatch(fileInfo.Name, p)))
                     return false;
-
-                if (options.MaxSizeBytes.HasValue && fileInfo.Length > options.MaxSizeBytes.Value)
-                    return false;
-
-                // Check exclude patterns
-                if (options.ExcludePatterns.Any())
-                {
-                    foreach (var pattern in options.ExcludePatterns)
-                    {
-                        if (IsPatternMatch(fileInfo.Name, pattern))
-                        {
-                            return false;
-                        }
-                    }
-                }
-
-                // Check include patterns
-                if (options.IncludePatterns.Any())
-                {
-                    bool matchesAny = false;
-                    foreach (var pattern in options.IncludePatterns)
-                    {
-                        if (IsPatternMatch(fileInfo.Name, pattern))
-                        {
-                            matchesAny = true;
-                            break;
-                        }
-                    }
-                    if (!matchesAny)
-                    {
-                        return false;
-                    }
-                }
-
-                // Check content filter
-                if (!string.IsNullOrWhiteSpace(options.ContentFilter))
-                {
-                    return await ContainsTextAsync(filePath, options.ContentFilter, options.CaseSensitive, options.UseRegex);
-                }
 
                 return true;
             }
-            catch (Exception)
+            catch { return false; }
+        }
+
+        /// <summary>Reads the file and returns match statistics, or null if no match found.</summary>
+        private async Task<MatchInfo?> GetMatchInfoAsync(string filePath, string searchText,
+            bool caseSensitive, bool useRegex, bool multiline)
+        {
+            try
             {
-                // Skip files that can't be accessed
-                return false;
+                if (IsBinaryFile(filePath)) return null;
+
+                string content;
+                using (var reader = new StreamReader(filePath))
+                    content = await reader.ReadToEndAsync();
+
+                if (useRegex)
+                {
+                    var regexOptions = caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase;
+                    if (multiline) regexOptions |= RegexOptions.Singleline; // dot matches \n
+                    MatchCollection matches;
+                    try { matches = Regex.Matches(content, searchText, regexOptions); }
+                    catch { return null; }
+
+                    if (matches.Count == 0) return null;
+
+                    var firstIdx = matches[0].Index;
+                    var lineNum = content[..firstIdx].Count(c => c == '\n') + 1;
+                    var snippet = matches[0].Value.Replace('\r', ' ').Replace('\n', ' ');
+                    if (snippet.Length > 100) snippet = snippet[..100] + "...";
+                    return new MatchInfo(matches.Count, lineNum, snippet);
+                }
+                else
+                {
+                    var lines = content.Split('\n');
+                    int count = 0, firstLine = 0;
+                    string snippet = "";
+                    var comp = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+                    for (int i = 0; i < lines.Length; i++)
+                    {
+                        if (lines[i].Contains(searchText, comp))
+                        {
+                            count++;
+                            if (count == 1)
+                            {
+                                firstLine = i + 1;
+                                snippet = lines[i].Trim();
+                                if (snippet.Length > 100) snippet = snippet[..100] + "...";
+                            }
+                        }
+                    }
+                    return count > 0 ? new MatchInfo(count, firstLine, snippet) : null;
+                }
             }
+            catch { return null; }
         }
 
         private async Task<List<string>> SearchInArchiveFileAsync(string archivePath, string extension, SearchOptions options, IProgress<string>? progress)
@@ -371,30 +386,7 @@ namespace FetchLog.Services
                 var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
                 return content.Contains(pattern, comparison);
             }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private async Task<bool> ContainsTextAsync(string filePath, string searchText, bool caseSensitive, bool useRegex)
-        {
-            try
-            {
-                // Only search in text-based files (skip binary files)
-                if (IsBinaryFile(filePath))
-                    return false;
-
-                using (var reader = new StreamReader(filePath))
-                {
-                    var content = await reader.ReadToEndAsync();
-                    return IsContentMatch(content, searchText, caseSensitive, useRegex);
-                }
-            }
-            catch (Exception)
-            {
-                return false;
-            }
+            catch { return false; }
         }
 
         private bool IsBinaryFile(string filePath)

@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,6 +24,7 @@ namespace FetchLog
         private SearchService _searchService;
         private ExportService _exportService;
         private ProfileService _profileService;
+        private HistoryService _historyService;
         private CancellationTokenSource? _cancellationTokenSource;
 
         public MainWindow()
@@ -33,13 +35,18 @@ namespace FetchLog
             _searchService = new SearchService();
             _exportService = new ExportService();
             _profileService = new ProfileService();
+            _historyService = new HistoryService();
 
             lstDirectories.ItemsSource = _directories;
             lvResults.ItemsSource = _searchResults;
 
-            // Set default output path
-            txtOutputPath.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FetchLog_Results");
+            txtOutputPath.Text = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FetchLog_Results");
+
+            _ = LoadHistoryAsync();
         }
+
+        // ── Directory management ─────────────────────────────────────────────
 
         private void BtnAddDirectory_Click(object sender, RoutedEventArgs e)
         {
@@ -83,9 +90,8 @@ namespace FetchLog
         {
             if (_directories.Count > 0)
             {
-                var result = MessageBox.Show("Are you sure you want to clear all directories?", "Confirm Clear",
-                    MessageBoxButton.YesNo, MessageBoxImage.Question);
-
+                var result = MessageBox.Show("Are you sure you want to clear all directories?",
+                    "Confirm Clear", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (result == MessageBoxResult.Yes)
                 {
                     _directories.Clear();
@@ -112,6 +118,8 @@ namespace FetchLog
             }
         }
 
+        // ── Search ───────────────────────────────────────────────────────────
+
         private async void BtnSearch_Click(object sender, RoutedEventArgs e)
         {
             if (_directories.Count == 0)
@@ -130,7 +138,6 @@ namespace FetchLog
 
             var options = BuildSearchOptions();
 
-            // Validate regex pattern before starting
             if (options.UseRegex && !string.IsNullOrWhiteSpace(options.ContentFilter))
             {
                 try { Regex.IsMatch("", options.ContentFilter); }
@@ -147,6 +154,8 @@ namespace FetchLog
             txtFilesCopied.Text = "0";
             txtSearchTime.Text = "0.00s";
             btnExportResults.IsEnabled = false;
+            txtPreview.Text = "";
+            txtPreviewHeader.Text = "Select a file to preview its content";
 
             SetSearchingState(true);
             _cancellationTokenSource = new CancellationTokenSource();
@@ -200,6 +209,10 @@ namespace FetchLog
 
                 btnExportResults.IsEnabled = true;
 
+                // Save to history (#12)
+                await _historyService.AddAsync(options, results.Count);
+                await LoadHistoryAsync();
+
                 UpdateStatus($"Search completed. Found {results.Count} file(s), collected {copiedCount} file(s).");
 
                 MessageBox.Show(
@@ -242,6 +255,104 @@ namespace FetchLog
         {
             _cancellationTokenSource?.Cancel();
             UpdateStatus("Cancelling search...");
+        }
+
+        // ── Content Match Preview Panel (#8) ─────────────────────────────────
+
+        private async void LvResults_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (lvResults.SelectedItem is not SearchResult result)
+            {
+                txtPreviewHeader.Text = "Select a file to preview its content";
+                txtPreview.Text = "";
+                return;
+            }
+
+            if (result.IsInZip)
+            {
+                txtPreviewHeader.Text = $"[Archive]  {result.FileName}";
+                txtPreview.Text = "Preview not available for files inside archives.";
+                return;
+            }
+
+            txtPreviewHeader.Text = "Loading preview...";
+            txtPreview.Text = "";
+
+            // Capture UI-thread values before going async
+            var contentFilter = txtContentFilter.Text.Trim();
+            var useRegex = chkUseRegex.IsChecked == true;
+            var caseSensitive = chkCaseSensitive.IsChecked == true;
+
+            try
+            {
+                var (header, content) = await Task.Run(() =>
+                    BuildPreview(result, contentFilter, useRegex, caseSensitive));
+                txtPreviewHeader.Text = header;
+                txtPreview.Text = content;
+            }
+            catch (Exception ex)
+            {
+                txtPreviewHeader.Text = "Error loading preview";
+                txtPreview.Text = ex.Message;
+            }
+        }
+
+        private static (string header, string content) BuildPreview(
+            SearchResult result, string contentFilter, bool useRegex, bool caseSensitive)
+        {
+            const int maxLines = 500;
+            const int contextLines = 2;
+
+            if (!File.Exists(result.SourcePath))
+                return ("File not found", "The source file no longer exists.");
+
+            string[] lines;
+            try { lines = File.ReadAllLines(result.SourcePath); }
+            catch { return ("Binary or unreadable file", "This file cannot be previewed."); }
+
+            // No content filter or no matches → show first N lines
+            if (string.IsNullOrWhiteSpace(contentFilter) || result.MatchCount == 0)
+            {
+                var preview = string.Join("\n", lines.Take(maxLines));
+                if (lines.Length > maxLines)
+                    preview += $"\n\n... ({lines.Length - maxLines} more lines not shown)";
+                return ($"{result.FileName}  ·  {lines.Length} lines", preview);
+            }
+
+            // Show matching lines with ±contextLines around each hit (#8 context view)
+            var showLines = new SortedSet<int>();
+            for (int i = 0; i < lines.Length; i++)
+            {
+                bool matched;
+                try
+                {
+                    matched = useRegex
+                        ? Regex.IsMatch(lines[i], contentFilter,
+                            caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase)
+                        : lines[i].Contains(contentFilter,
+                            caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+                }
+                catch { matched = false; }
+
+                if (matched)
+                    for (int j = Math.Max(0, i - contextLines); j <= Math.Min(lines.Length - 1, i + contextLines); j++)
+                        showLines.Add(j);
+            }
+
+            var sb = new StringBuilder();
+            int? lastIdx = null;
+            foreach (var idx in showLines)
+            {
+                if (lastIdx.HasValue && idx > lastIdx.Value + 1)
+                    sb.AppendLine("   ···");
+                sb.AppendLine($"  {idx + 1,5}: {lines[idx]}");
+                lastIdx = idx;
+            }
+
+            return (
+                $"{result.FileName}  ·  {result.MatchCount} match(es), first at line {result.FirstMatchLine}",
+                sb.ToString().TrimEnd()
+            );
         }
 
         // ── Export Results (#4) ──────────────────────────────────────────────
@@ -342,6 +453,40 @@ namespace FetchLog
             }
         }
 
+        // ── Search History (#12) ─────────────────────────────────────────────
+
+        private async Task LoadHistoryAsync()
+        {
+            var entries = await _historyService.LoadAsync();
+            cmbHistory.ItemsSource = entries;
+        }
+
+        private void BtnLoadHistory_Click(object sender, RoutedEventArgs e)
+        {
+            if (cmbHistory.SelectedItem is SearchHistoryEntry entry)
+            {
+                ApplyOptionsToUI(entry.Options);
+                UpdateStatus($"Loaded search from {entry.Timestamp:yyyy-MM-dd HH:mm}  ({entry.ResultCount} results)");
+            }
+            else
+            {
+                MessageBox.Show("Please select a history entry first.", "No Selection",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+
+        private async void BtnClearHistory_Click(object sender, RoutedEventArgs e)
+        {
+            var result = MessageBox.Show("Clear all search history?", "Confirm",
+                MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (result == MessageBoxResult.Yes)
+            {
+                await _historyService.ClearAsync();
+                await LoadHistoryAsync();
+                UpdateStatus("Search history cleared.");
+            }
+        }
+
         // ── Helpers ──────────────────────────────────────────────────────────
 
         private SearchOptions BuildSearchOptions()
@@ -353,32 +498,31 @@ namespace FetchLog
                 SearchInZip = chkSearchInZip.IsChecked ?? true,
                 CaseSensitive = chkCaseSensitive.IsChecked ?? false,
                 UseRegex = chkUseRegex.IsChecked ?? false,
+                MultilineSearch = chkMultilineSearch.IsChecked ?? false,
                 CompressOutput = chkCompressOutput.IsChecked ?? false,
                 PreserveStructure = chkPreserveStructure.IsChecked ?? false,
                 OutputPath = txtOutputPath.Text,
                 ContentFilter = txtContentFilter.Text.Trim()
             };
 
-            // Date/time range filter
+            if (!string.IsNullOrWhiteSpace(txtMinMatchCount.Text) &&
+                int.TryParse(txtMinMatchCount.Text, out int minHits) && minHits > 0)
+                options.MinMatchCount = minHits;
+
             if (chkDateFilter.IsChecked == true)
             {
                 if (dtpDateFrom.SelectedDate.HasValue)
                     options.DateFrom = dtpDateFrom.SelectedDate.Value.Date;
-
                 if (dtpDateTo.SelectedDate.HasValue)
                     options.DateTo = dtpDateTo.SelectedDate.Value.Date.AddDays(1).AddTicks(-1);
-
                 options.DateFilterMode = cmbDateMode.SelectedIndex == 1
-                    ? DateFilterMode.Created
-                    : DateFilterMode.LastModified;
+                    ? DateFilterMode.Created : DateFilterMode.LastModified;
             }
 
-            // File size filter
             if (chkSizeFilter.IsChecked == true)
             {
                 if (!string.IsNullOrWhiteSpace(txtMinSize.Text) && double.TryParse(txtMinSize.Text, out double minVal))
                     options.MinSizeBytes = (long)(minVal * GetSizeMultiplier(cmbMinSizeUnit.SelectedIndex));
-
                 if (!string.IsNullOrWhiteSpace(txtMaxSize.Text) && double.TryParse(txtMaxSize.Text, out double maxVal))
                     options.MaxSizeBytes = (long)(maxVal * GetSizeMultiplier(cmbMaxSizeUnit.SelectedIndex));
             }
@@ -412,6 +556,7 @@ namespace FetchLog
             txtIncludePatterns.Text = string.Join(", ", options.IncludePatterns);
             txtExcludePatterns.Text = string.Join(", ", options.ExcludePatterns);
             txtContentFilter.Text = options.ContentFilter;
+            txtMinMatchCount.Text = options.MinMatchCount.HasValue ? options.MinMatchCount.Value.ToString() : "";
 
             if (!string.IsNullOrWhiteSpace(options.OutputPath))
                 txtOutputPath.Text = options.OutputPath;
@@ -420,19 +565,20 @@ namespace FetchLog
             chkSearchInZip.IsChecked = options.SearchInZip;
             chkCaseSensitive.IsChecked = options.CaseSensitive;
             chkUseRegex.IsChecked = options.UseRegex;
+            chkMultilineSearch.IsChecked = options.MultilineSearch;
             chkCompressOutput.IsChecked = options.CompressOutput;
             chkPreserveStructure.IsChecked = options.PreserveStructure;
 
-            // Date range
             bool hasDate = options.DateFrom.HasValue || options.DateTo.HasValue;
             chkDateFilter.IsChecked = hasDate;
             dtpDateFrom.SelectedDate = options.DateFrom;
             dtpDateTo.SelectedDate = options.DateTo;
             cmbDateMode.SelectedIndex = options.DateFilterMode == DateFilterMode.Created ? 1 : 0;
 
-            // Size filter
             bool hasSize = options.MinSizeBytes.HasValue || options.MaxSizeBytes.HasValue;
             chkSizeFilter.IsChecked = hasSize;
+            txtMinSize.Text = "";
+            txtMaxSize.Text = "";
             if (options.MinSizeBytes.HasValue)
             {
                 var (val, unit) = BytesToDisplayUnit(options.MinSizeBytes.Value);
@@ -493,14 +639,19 @@ namespace FetchLog
             txtIncludePatterns.IsEnabled = !isSearching;
             txtExcludePatterns.IsEnabled = !isSearching;
             txtContentFilter.IsEnabled = !isSearching;
+            txtMinMatchCount.IsEnabled = !isSearching;
             chkRecursive.IsEnabled = !isSearching;
             chkSearchInZip.IsEnabled = !isSearching;
             chkCaseSensitive.IsEnabled = !isSearching;
             chkUseRegex.IsEnabled = !isSearching;
+            chkMultilineSearch.IsEnabled = !isSearching;
             chkCompressOutput.IsEnabled = !isSearching;
             chkPreserveStructure.IsEnabled = !isSearching;
             btnSaveProfile.IsEnabled = !isSearching;
             btnLoadProfile.IsEnabled = !isSearching;
+            btnLoadHistory.IsEnabled = !isSearching;
+            btnClearHistory.IsEnabled = !isSearching;
+            cmbHistory.IsEnabled = !isSearching;
             if (isSearching) btnExportResults.IsEnabled = false;
 
             chkSizeFilter.IsEnabled = !isSearching;
