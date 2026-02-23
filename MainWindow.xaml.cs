@@ -181,7 +181,7 @@ namespace FetchLog
                 {
                     UpdateStatus("Compressing files into ZIP archive...");
                     var (count, zipPath) = await _searchService.CompressFilesToZipAsync(
-                        results, options.OutputPath, progress, _cancellationTokenSource.Token);
+                        results, options, progress, _cancellationTokenSource.Token);
                     copiedCount = count;
                     outputDetail = $"Archive: {zipPath}";
                 }
@@ -189,7 +189,7 @@ namespace FetchLog
                 {
                     UpdateStatus("Copying files to output directory...");
                     copiedCount = await _searchService.CopyFilesToOutputAsync(
-                        results, options.OutputPath, progress, _cancellationTokenSource.Token);
+                        results, options, progress, _cancellationTokenSource.Token);
                     outputDetail = $"Output folder: {options.OutputPath}";
                 }
 
@@ -354,6 +354,7 @@ namespace FetchLog
                 CaseSensitive = chkCaseSensitive.IsChecked ?? false,
                 UseRegex = chkUseRegex.IsChecked ?? false,
                 CompressOutput = chkCompressOutput.IsChecked ?? false,
+                PreserveStructure = chkPreserveStructure.IsChecked ?? false,
                 OutputPath = txtOutputPath.Text,
                 ContentFilter = txtContentFilter.Text.Trim()
             };
@@ -420,6 +421,7 @@ namespace FetchLog
             chkCaseSensitive.IsChecked = options.CaseSensitive;
             chkUseRegex.IsChecked = options.UseRegex;
             chkCompressOutput.IsChecked = options.CompressOutput;
+            chkPreserveStructure.IsChecked = options.PreserveStructure;
 
             // Date range
             bool hasDate = options.DateFrom.HasValue || options.DateTo.HasValue;
@@ -496,6 +498,7 @@ namespace FetchLog
             chkCaseSensitive.IsEnabled = !isSearching;
             chkUseRegex.IsEnabled = !isSearching;
             chkCompressOutput.IsEnabled = !isSearching;
+            chkPreserveStructure.IsEnabled = !isSearching;
             btnSaveProfile.IsEnabled = !isSearching;
             btnLoadProfile.IsEnabled = !isSearching;
             if (isSearching) btnExportResults.IsEnabled = false;

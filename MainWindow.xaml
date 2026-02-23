@@ -141,6 +141,8 @@
                           ToolTip="Treat the Content Filter as a .NET regex pattern (e.g. ERROR\s+\d{4}-\d{2}-\d{2})"/>
                 <CheckBox Name="chkCompressOutput" Content="Compress collected files into a ZIP archive" IsChecked="False"
                           ToolTip="Bundle all matched files into a timestamped ZIP in the output folder instead of copying individually"/>
+                <CheckBox Name="chkPreserveStructure" Content="Preserve source directory structure in output" IsChecked="False"
+                          ToolTip="Mirror the original folder hierarchy under the output directory instead of flattening all files into one folder"/>
             </StackPanel>
         </GroupBox>
 

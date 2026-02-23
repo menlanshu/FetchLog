@@ -29,6 +29,7 @@ namespace FetchLog.Models
 
         // Output options
         public bool CompressOutput { get; set; } = false;
+        public bool PreserveStructure { get; set; } = false;
     }
 
     public enum DateFilterMode

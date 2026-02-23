@@ -57,7 +57,8 @@ namespace FetchLog.Services
                                 fileInfo.Length,
                                 true,
                                 file,
-                                fileInfo.LastWriteTime
+                                fileInfo.LastWriteTime,
+                                directory
                             ));
                             processedZipFiles.Add(file);
                             progress?.Report($"Found matches in {archiveType}: {fileInfo.Name}");
@@ -74,7 +75,8 @@ namespace FetchLog.Services
                                 fileInfo.Length,
                                 false,
                                 null,
-                                fileInfo.LastWriteTime
+                                fileInfo.LastWriteTime,
+                                directory
                             ));
                             progress?.Report($"Match found: {fileInfo.Name}");
                         }
@@ -432,14 +434,13 @@ namespace FetchLog.Services
             return false;
         }
 
-        public async Task<int> CopyFilesToOutputAsync(List<SearchResult> results, string outputPath, IProgress<string>? progress, CancellationToken cancellationToken)
+        public async Task<int> CopyFilesToOutputAsync(List<SearchResult> results, SearchOptions options, IProgress<string>? progress, CancellationToken cancellationToken)
         {
             int copiedCount = 0;
+            var outputPath = options.OutputPath;
 
             if (!Directory.Exists(outputPath))
-            {
                 Directory.CreateDirectory(outputPath);
-            }
 
             foreach (var result in results)
             {
@@ -447,23 +448,34 @@ namespace FetchLog.Services
 
                 try
                 {
-                    var destFileName = result.FileName;
-                    var destPath = Path.Combine(outputPath, destFileName);
+                    string destPath;
 
-                    // Handle duplicate file names
-                    int counter = 1;
-                    while (File.Exists(destPath))
+                    if (options.PreserveStructure && !string.IsNullOrEmpty(result.SearchRootDirectory))
                     {
-                        var nameWithoutExt = Path.GetFileNameWithoutExtension(result.FileName);
-                        var extension = Path.GetExtension(result.FileName);
-                        destFileName = $"{nameWithoutExt}_{counter}{extension}";
+                        // Mirror the source directory tree under outputPath
+                        var relativePath = Path.GetRelativePath(result.SearchRootDirectory, result.SourcePath);
+                        destPath = Path.Combine(outputPath, relativePath);
+                        Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+                    }
+                    else
+                    {
+                        // Flat copy — handle duplicate file names
+                        var destFileName = result.FileName;
                         destPath = Path.Combine(outputPath, destFileName);
-                        counter++;
+                        int counter = 1;
+                        while (File.Exists(destPath))
+                        {
+                            var nameWithoutExt = Path.GetFileNameWithoutExtension(result.FileName);
+                            var extension = Path.GetExtension(result.FileName);
+                            destFileName = $"{nameWithoutExt}_{counter}{extension}";
+                            destPath = Path.Combine(outputPath, destFileName);
+                            counter++;
+                        }
                     }
 
-                    await Task.Run(() => File.Copy(result.SourcePath, destPath), cancellationToken);
+                    await Task.Run(() => File.Copy(result.SourcePath, destPath, overwrite: false), cancellationToken);
                     copiedCount++;
-                    progress?.Report($"Copied: {destFileName}");
+                    progress?.Report($"Copied: {Path.GetFileName(destPath)}");
                 }
                 catch (Exception ex)
                 {
@@ -474,9 +486,10 @@ namespace FetchLog.Services
             return copiedCount;
         }
 
-        public async Task<(int count, string zipPath)> CompressFilesToZipAsync(List<SearchResult> results, string outputPath, IProgress<string>? progress, CancellationToken cancellationToken)
+        public async Task<(int count, string zipPath)> CompressFilesToZipAsync(List<SearchResult> results, SearchOptions options, IProgress<string>? progress, CancellationToken cancellationToken)
         {
             int count = 0;
+            var outputPath = options.OutputPath;
 
             if (!Directory.Exists(outputPath))
                 Directory.CreateDirectory(outputPath);
@@ -495,17 +508,28 @@ namespace FetchLog.Services
 
                         try
                         {
-                            var entryName = result.FileName;
-                            if (existingNames.Contains(entryName))
-                            {
-                                int counter = 1;
-                                var ext = Path.GetExtension(result.FileName);
-                                var nameNoExt = Path.GetFileNameWithoutExtension(result.FileName);
-                                do { entryName = $"{nameNoExt}_{counter++}{ext}"; }
-                                while (existingNames.Contains(entryName));
-                            }
-                            existingNames.Add(entryName);
+                            string entryName;
 
+                            if (options.PreserveStructure && !string.IsNullOrEmpty(result.SearchRootDirectory))
+                            {
+                                // Use the relative path as the ZIP entry (preserves folder tree inside archive)
+                                entryName = Path.GetRelativePath(result.SearchRootDirectory, result.SourcePath)
+                                               .Replace('\\', '/');
+                            }
+                            else
+                            {
+                                entryName = result.FileName;
+                                if (existingNames.Contains(entryName))
+                                {
+                                    int counter = 1;
+                                    var ext = Path.GetExtension(result.FileName);
+                                    var nameNoExt = Path.GetFileNameWithoutExtension(result.FileName);
+                                    do { entryName = $"{nameNoExt}_{counter++}{ext}"; }
+                                    while (existingNames.Contains(entryName));
+                                }
+                            }
+
+                            existingNames.Add(entryName);
                             archive.CreateEntryFromFile(result.SourcePath, entryName, CompressionLevel.Optimal);
                             count++;
                             progress?.Report($"Compressed: {entryName}");
