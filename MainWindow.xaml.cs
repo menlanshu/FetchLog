@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -12,6 +13,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Forms;
+using System.Windows.Input;
 using FetchLog.Models;
 using FetchLog.Services;
 using MessageBox = System.Windows.MessageBox;
@@ -28,6 +30,10 @@ namespace FetchLog
         private HistoryService _historyService;
         private FavoritesService _favoritesService;
         private CancellationTokenSource? _cancellationTokenSource;
+
+        // Column sort state
+        private GridViewColumnHeader? _lastSortHeader;
+        private ListSortDirection _lastSortDirection = ListSortDirection.Ascending;
 
         public MainWindow()
         {
@@ -280,6 +286,7 @@ namespace FetchLog
                 stopwatch.Stop();
                 txtSearchTime.Text = $"{stopwatch.Elapsed.TotalSeconds:F2}s";
                 txtFilesFound.Text = results.Count.ToString();
+                txtTotalSize.Text = FormatBytes(results.Sum(r => r.SizeInBytes));
 
                 if (results.Count == 0)
                 {
@@ -332,6 +339,7 @@ namespace FetchLog
                 }
 
                 txtFilesCopied.Text = copiedCount.ToString();
+                btnExportResults.IsEnabled = true;
 
                 // Save to history (#12)
                 await _historyService.AddAsync(options, results.Count);
@@ -904,6 +912,145 @@ namespace FetchLog
             bool renameEnabled = !isSearching && (chkRename.IsChecked == true);
             txtRenamePrefix.IsEnabled = renameEnabled;
             txtRenameSuffix.IsEnabled = renameEnabled;
+        }
+
+        // ── Double-click to open file ─────────────────────────────────────────
+
+        private void LvResults_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (lvResults.SelectedItem is not SearchResult result) return;
+            if (result.IsInZip)
+            {
+                UpdateStatus("Cannot open files inside archives directly.");
+                return;
+            }
+            if (!File.Exists(result.SourcePath))
+            {
+                MessageBox.Show("The file no longer exists at its original path.", "File Not Found",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            try { Process.Start(new ProcessStartInfo(result.SourcePath) { UseShellExecute = true }); }
+            catch (Exception ex) { MessageBox.Show($"Cannot open file:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error); }
+        }
+
+        // ── Right-click context menu ──────────────────────────────────────────
+
+        private void LvResultsContextMenu_Opened(object sender, RoutedEventArgs e)
+        {
+            var result = lvResults.SelectedItem as SearchResult;
+            bool hasResult = result != null;
+            bool isRegularFile = hasResult && !result!.IsInZip;
+
+            cmOpenFile.IsEnabled   = isRegularFile && File.Exists(result!.SourcePath);
+            cmOpenFolder.IsEnabled = hasResult;   // works for archives too (opens archive's folder)
+            cmCopyPath.IsEnabled   = hasResult;
+            cmCopyName.IsEnabled   = hasResult;
+            cmCopyHash.IsEnabled   = hasResult && !string.IsNullOrEmpty(result!.Md5Hash);
+        }
+
+        private void CmOpenFile_Click(object sender, RoutedEventArgs e)
+        {
+            if (lvResults.SelectedItem is not SearchResult result || result.IsInZip) return;
+            try { Process.Start(new ProcessStartInfo(result.SourcePath) { UseShellExecute = true }); }
+            catch (Exception ex) { MessageBox.Show($"Cannot open file:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error); }
+        }
+
+        private void CmOpenFolder_Click(object sender, RoutedEventArgs e)
+        {
+            if (lvResults.SelectedItem is not SearchResult result) return;
+            // For archive-internal results, open the archive's containing folder
+            var targetPath = result.IsInZip && result.ZipFilePath != null
+                ? result.ZipFilePath
+                : result.SourcePath;
+            if (File.Exists(targetPath))
+                Process.Start("explorer.exe", $"/select,\"{targetPath}\"");
+            else if (Directory.Exists(Path.GetDirectoryName(targetPath) ?? ""))
+                Process.Start("explorer.exe", Path.GetDirectoryName(targetPath)!);
+        }
+
+        private void CmCopyPath_Click(object sender, RoutedEventArgs e)
+        {
+            if (lvResults.SelectedItem is SearchResult result)
+            {
+                System.Windows.Clipboard.SetText(result.SourcePath);
+                UpdateStatus($"Copied path: {result.SourcePath}");
+            }
+        }
+
+        private void CmCopyName_Click(object sender, RoutedEventArgs e)
+        {
+            if (lvResults.SelectedItem is SearchResult result)
+            {
+                System.Windows.Clipboard.SetText(result.FileName);
+                UpdateStatus($"Copied name: {result.FileName}");
+            }
+        }
+
+        private void CmCopyHash_Click(object sender, RoutedEventArgs e)
+        {
+            if (lvResults.SelectedItem is SearchResult result && result.Md5Hash != null)
+            {
+                System.Windows.Clipboard.SetText(result.Md5Hash);
+                UpdateStatus($"Copied MD5: {result.Md5Hash}");
+            }
+        }
+
+        // ── Column-header sorting ─────────────────────────────────────────────
+
+        private void GridViewColumnHeader_Click(object sender, RoutedEventArgs e)
+        {
+            if (e.OriginalSource is not GridViewColumnHeader header || header.Role == GridViewColumnHeaderRole.Padding)
+                return;
+
+            // Map column header text to the correct sortable property name
+            var sortProperty = header.Content?.ToString() switch
+            {
+                "File Name"   => "FileName",
+                "Source Path" => "SourcePath",
+                "Size"        => "SizeInBytes",
+                "Type"        => "FileType",
+                "Modified"    => "LastModified",
+                "Matches"     => "MatchCount",
+                "Line"        => "FirstMatchLine",
+                "Hash (MD5)"  => "Md5Hash",
+                "Format"      => "LogFormat",
+                _             => null
+            };
+            if (sortProperty == null) return;
+
+            var direction = (_lastSortHeader == header && _lastSortDirection == ListSortDirection.Ascending)
+                ? ListSortDirection.Descending
+                : ListSortDirection.Ascending;
+
+            var view = CollectionViewSource.GetDefaultView(lvResults.ItemsSource);
+            if (view == null) return;
+
+            view.SortDescriptions.Clear();
+            view.SortDescriptions.Add(new SortDescription(sortProperty, direction));
+
+            // Visual indicator: append ▲/▼ to active header, restore previous
+            if (_lastSortHeader != null && _lastSortHeader != header)
+            {
+                var prev = _lastSortHeader.Content?.ToString()?.TrimEnd(' ', '▲', '▼');
+                if (prev != null) _lastSortHeader.Content = prev;
+            }
+            var label = header.Content?.ToString()?.TrimEnd(' ', '▲', '▼') ?? "";
+            header.Content = label + (direction == ListSortDirection.Ascending ? " ▲" : " ▼");
+
+            _lastSortHeader = header;
+            _lastSortDirection = direction;
+        }
+
+        // ── Size formatting helper ────────────────────────────────────────────
+
+        private static string FormatBytes(long bytes)
+        {
+            string[] units = { "B", "KB", "MB", "GB", "TB" };
+            double val = bytes;
+            int order = 0;
+            while (val >= 1024 && order < units.Length - 1) { order++; val /= 1024; }
+            return $"{val:0.##} {units[order]}";
         }
 
         private void UpdateStatus(string message)

@@ -291,6 +291,8 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
                 <Label Content="Search Time:" Grid.Column="0"/>
                 <TextBox Name="txtSearchTime" Grid.Column="1" IsReadOnly="True" Text="0.00s"/>
@@ -298,6 +300,8 @@
                 <TextBox Name="txtFilesFound" Grid.Column="3" IsReadOnly="True" Text="0"/>
                 <Label Content="Files Copied:" Grid.Column="4"/>
                 <TextBox Name="txtFilesCopied" Grid.Column="5" IsReadOnly="True" Text="0"/>
+                <Label Content="Total Size:" Grid.Column="6"/>
+                <TextBox Name="txtTotalSize" Grid.Column="7" IsReadOnly="True" Text="0 B"/>
             </Grid>
         </GroupBox>
 
@@ -327,7 +331,20 @@
 
                 <!-- Results list with match columns -->
                 <ListView Name="lvResults" Grid.Row="1"
-                          SelectionChanged="LvResults_SelectionChanged">
+                          SelectionChanged="LvResults_SelectionChanged"
+                          MouseDoubleClick="LvResults_MouseDoubleClick"
+                          GridViewColumnHeader.Click="GridViewColumnHeader_Click">
+                    <!-- Right-click context menu -->
+                    <ListView.ContextMenu>
+                        <ContextMenu Opened="LvResultsContextMenu_Opened">
+                            <MenuItem Name="cmOpenFile"   Header="Open File"               Click="CmOpenFile_Click"/>
+                            <MenuItem Name="cmOpenFolder" Header="Open Containing Folder"   Click="CmOpenFolder_Click"/>
+                            <Separator/>
+                            <MenuItem Name="cmCopyPath"   Header="Copy Full Path"           Click="CmCopyPath_Click"/>
+                            <MenuItem Name="cmCopyName"   Header="Copy File Name"           Click="CmCopyName_Click"/>
+                            <MenuItem Name="cmCopyHash"   Header="Copy MD5 Hash"            Click="CmCopyHash_Click"/>
+                        </ContextMenu>
+                    </ListView.ContextMenu>
                     <!-- Highlight duplicate files in light orange (#19) -->
                     <ListView.ItemContainerStyle>
                         <Style TargetType="ListViewItem">
