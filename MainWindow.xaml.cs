@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Forms;
 using FetchLog.Models;
 using FetchLog.Services;
@@ -25,6 +26,7 @@ namespace FetchLog
         private ExportService _exportService;
         private ProfileService _profileService;
         private HistoryService _historyService;
+        private FavoritesService _favoritesService;
         private CancellationTokenSource? _cancellationTokenSource;
 
         public MainWindow()
@@ -36,6 +38,7 @@ namespace FetchLog
             _exportService = new ExportService();
             _profileService = new ProfileService();
             _historyService = new HistoryService();
+            _favoritesService = new FavoritesService();
 
             lstDirectories.ItemsSource = _directories;
             lvResults.ItemsSource = _searchResults;
@@ -44,6 +47,7 @@ namespace FetchLog
                 Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FetchLog_Results");
 
             _ = LoadHistoryAsync();
+            _ = LoadFavoritesAsync();
         }
 
         // ── Directory management ─────────────────────────────────────────────
@@ -116,6 +120,92 @@ namespace FetchLog
                     UpdateStatus($"Output path set to: {dialog.SelectedPath}");
                 }
             }
+        }
+
+        // ── Favorites (#13) ──────────────────────────────────────────────────
+
+        private async Task LoadFavoritesAsync()
+        {
+            var favorites = await _favoritesService.LoadAsync();
+            cmbFavorites.ItemsSource = favorites;
+        }
+
+        private async void BtnAddFavorite_Click(object sender, RoutedEventArgs e)
+        {
+            var dir = lstDirectories.SelectedItem?.ToString();
+            if (string.IsNullOrEmpty(dir))
+            {
+                MessageBox.Show("Select a directory from the list above to save as a favorite.",
+                    "No Selection", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            await _favoritesService.AddAsync(dir);
+            await LoadFavoritesAsync();
+            UpdateStatus($"Saved favorite: {dir}");
+        }
+
+        private void BtnUseFavorite_Click(object sender, RoutedEventArgs e)
+        {
+            if (cmbFavorites.SelectedItem is string dir)
+            {
+                if (!_directories.Contains(dir))
+                {
+                    _directories.Add(dir);
+                    UpdateStatus($"Added from favorites: {dir}");
+                }
+                else
+                {
+                    UpdateStatus($"Already in list: {dir}");
+                }
+            }
+            else
+            {
+                MessageBox.Show("Select a favorite from the dropdown first.", "No Selection",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+
+        private async void BtnRemoveFavorite_Click(object sender, RoutedEventArgs e)
+        {
+            if (cmbFavorites.SelectedItem is string dir)
+            {
+                await _favoritesService.RemoveAsync(dir);
+                await LoadFavoritesAsync();
+                UpdateStatus($"Removed favorite: {dir}");
+            }
+            else
+            {
+                MessageBox.Show("Select a favorite from the dropdown first.", "No Selection",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+
+        // ── Drag & Drop (#14) ────────────────────────────────────────────────
+
+        private void LstDirectories_DragEnter(object sender, DragEventArgs e)
+        {
+            e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop)
+                ? DragDropEffects.Copy
+                : DragDropEffects.None;
+            e.Handled = true;
+        }
+
+        private void LstDirectories_Drop(object sender, DragEventArgs e)
+        {
+            if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+
+            var paths = (string[])e.Data.GetData(DataFormats.FileDrop);
+            int added = 0;
+            foreach (var path in paths)
+            {
+                if (Directory.Exists(path) && !_directories.Contains(path))
+                {
+                    _directories.Add(path);
+                    added++;
+                }
+            }
+            if (added > 0)
+                UpdateStatus($"Added {added} director{(added == 1 ? "y" : "ies")} via drag & drop.");
         }
 
         // ── Search ───────────────────────────────────────────────────────────
@@ -206,6 +296,9 @@ namespace FetchLog
 
                 foreach (var result in results)
                     _searchResults.Add(result);
+
+                // Re-apply current grouping to the new results (#17)
+                ApplyGrouping(cmbGroupBy.SelectedIndex);
 
                 btnExportResults.IsEnabled = true;
 
@@ -353,6 +446,35 @@ namespace FetchLog
                 $"{result.FileName}  ·  {result.MatchCount} match(es), first at line {result.FirstMatchLine}",
                 sb.ToString().TrimEnd()
             );
+        }
+
+        // ── Result Grouping (#17) ─────────────────────────────────────────────
+
+        private void CmbGroupBy_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            ApplyGrouping(cmbGroupBy.SelectedIndex);
+        }
+
+        private void ApplyGrouping(int groupIndex)
+        {
+            var view = CollectionViewSource.GetDefaultView(lvResults.ItemsSource);
+            if (view == null) return;
+
+            view.GroupDescriptions.Clear();
+
+            switch (groupIndex)
+            {
+                case 1: // Extension
+                    view.GroupDescriptions.Add(new PropertyGroupDescription("Extension"));
+                    break;
+                case 2: // Directory (search root)
+                    view.GroupDescriptions.Add(new PropertyGroupDescription("SearchRootDirectory"));
+                    break;
+                case 3: // Date (Month)
+                    view.GroupDescriptions.Add(new PropertyGroupDescription("MonthGroup"));
+                    break;
+                // case 0 (None): no grouping
+            }
         }
 
         // ── Export Results (#4) ──────────────────────────────────────────────
@@ -527,6 +649,24 @@ namespace FetchLog
                     options.MaxSizeBytes = (long)(maxVal * GetSizeMultiplier(cmbMaxSizeUnit.SelectedIndex));
             }
 
+            // Collection caps (#15)
+            if (chkCollectionCap.IsChecked == true)
+            {
+                if (!string.IsNullOrWhiteSpace(txtMaxFileCount.Text) &&
+                    int.TryParse(txtMaxFileCount.Text, out int maxFiles) && maxFiles > 0)
+                    options.MaxFileCount = maxFiles;
+                if (!string.IsNullOrWhiteSpace(txtMaxTotalSize.Text) &&
+                    double.TryParse(txtMaxTotalSize.Text, out double maxSize) && maxSize > 0)
+                    options.MaxTotalSizeBytes = (long)(maxSize * GetSizeMultiplier(cmbMaxTotalSizeUnit.SelectedIndex));
+            }
+
+            // Rename on copy (#16)
+            if (chkRename.IsChecked == true)
+            {
+                options.RenamePrefix = txtRenamePrefix.Text;
+                options.RenameSuffix = txtRenameSuffix.Text;
+            }
+
             if (!string.IsNullOrWhiteSpace(txtFileExtensions.Text))
                 options.FileExtensions = txtFileExtensions.Text
                     .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
@@ -591,6 +731,24 @@ namespace FetchLog
                 txtMaxSize.Text = $"{val:0.##}";
                 cmbMaxSizeUnit.SelectedIndex = unit;
             }
+
+            // Collection caps (#15)
+            bool hasCap = options.MaxFileCount.HasValue || options.MaxTotalSizeBytes.HasValue;
+            chkCollectionCap.IsChecked = hasCap;
+            txtMaxFileCount.Text = options.MaxFileCount.HasValue ? options.MaxFileCount.Value.ToString() : "";
+            txtMaxTotalSize.Text = "";
+            if (options.MaxTotalSizeBytes.HasValue)
+            {
+                var (val, unit) = BytesToDisplayUnit(options.MaxTotalSizeBytes.Value);
+                txtMaxTotalSize.Text = $"{val:0.##}";
+                cmbMaxTotalSizeUnit.SelectedIndex = unit;
+            }
+
+            // Rename on copy (#16)
+            bool hasRename = !string.IsNullOrEmpty(options.RenamePrefix) || !string.IsNullOrEmpty(options.RenameSuffix);
+            chkRename.IsChecked = hasRename;
+            txtRenamePrefix.Text = options.RenamePrefix;
+            txtRenameSuffix.Text = options.RenameSuffix;
         }
 
         private static (double value, int unitIndex) BytesToDisplayUnit(long bytes)
@@ -627,6 +785,21 @@ namespace FetchLog
             cmbDateMode.IsEnabled = enabled;
         }
 
+        private void ChkCollectionCap_Changed(object sender, RoutedEventArgs e)
+        {
+            bool enabled = chkCollectionCap.IsChecked == true;
+            txtMaxFileCount.IsEnabled = enabled;
+            txtMaxTotalSize.IsEnabled = enabled;
+            cmbMaxTotalSizeUnit.IsEnabled = enabled;
+        }
+
+        private void ChkRename_Changed(object sender, RoutedEventArgs e)
+        {
+            bool enabled = chkRename.IsChecked == true;
+            txtRenamePrefix.IsEnabled = enabled;
+            txtRenameSuffix.IsEnabled = enabled;
+        }
+
         private void SetSearchingState(bool isSearching)
         {
             btnSearch.IsEnabled = !isSearching;
@@ -652,6 +825,14 @@ namespace FetchLog
             btnLoadHistory.IsEnabled = !isSearching;
             btnClearHistory.IsEnabled = !isSearching;
             cmbHistory.IsEnabled = !isSearching;
+            cmbGroupBy.IsEnabled = !isSearching;
+
+            // Favorites (#13)
+            btnAddFavorite.IsEnabled = !isSearching;
+            btnUseFavorite.IsEnabled = !isSearching;
+            btnRemoveFavorite.IsEnabled = !isSearching;
+            cmbFavorites.IsEnabled = !isSearching;
+
             if (isSearching) btnExportResults.IsEnabled = false;
 
             chkSizeFilter.IsEnabled = !isSearching;
@@ -666,6 +847,19 @@ namespace FetchLog
             dtpDateFrom.IsEnabled = dateEnabled;
             dtpDateTo.IsEnabled = dateEnabled;
             cmbDateMode.IsEnabled = dateEnabled;
+
+            // Collection caps (#15)
+            chkCollectionCap.IsEnabled = !isSearching;
+            bool capEnabled = !isSearching && (chkCollectionCap.IsChecked == true);
+            txtMaxFileCount.IsEnabled = capEnabled;
+            txtMaxTotalSize.IsEnabled = capEnabled;
+            cmbMaxTotalSizeUnit.IsEnabled = capEnabled;
+
+            // Rename (#16)
+            chkRename.IsEnabled = !isSearching;
+            bool renameEnabled = !isSearching && (chkRename.IsChecked == true);
+            txtRenamePrefix.IsEnabled = renameEnabled;
+            txtRenameSuffix.IsEnabled = renameEnabled;
         }
 
         private void UpdateStatus(string message)

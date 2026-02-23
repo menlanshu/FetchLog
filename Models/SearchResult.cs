@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 
 namespace FetchLog.Models
 {
@@ -21,6 +22,17 @@ namespace FetchLog.Models
         public string MatchSnippet { get; set; } = string.Empty;
         public string MatchCountDisplay => MatchCount > 0 ? MatchCount.ToString() : "";
         public string FirstMatchLineDisplay => FirstMatchLine > 0 ? $"L{FirstMatchLine}" : "";
+
+        // Grouping helpers (#17)
+        public string Extension
+        {
+            get
+            {
+                var ext = Path.GetExtension(FileName).ToUpperInvariant();
+                return string.IsNullOrEmpty(ext) ? "(no extension)" : ext;
+            }
+        }
+        public string MonthGroup => LastModified == default ? "Unknown" : LastModified.ToString("yyyy-MM");
 
         public SearchResult(string fileName, string sourcePath, long sizeInBytes, bool isInZip = false,
             string? zipFilePath = null, DateTime lastModified = default, string searchRootDirectory = "",

@@ -32,6 +32,14 @@ namespace FetchLog.Models
         // Output options
         public bool CompressOutput { get; set; } = false;
         public bool PreserveStructure { get; set; } = false;
+
+        // Collection caps (#15)
+        public int? MaxFileCount { get; set; }
+        public long? MaxTotalSizeBytes { get; set; }
+
+        // Rename on copy (#16)
+        public string RenamePrefix { get; set; } = string.Empty;
+        public string RenameSuffix { get; set; } = string.Empty;
     }
 
     public enum DateFilterMode

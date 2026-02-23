@@ -90,6 +90,29 @@ namespace FetchLog.Services
                 }
             }
 
+            // Apply collection caps (#15) — total-size cap first, then file-count cap
+            if (options.MaxTotalSizeBytes.HasValue)
+            {
+                long running = 0;
+                int cutoff = results.Count;
+                for (int i = 0; i < results.Count; i++)
+                {
+                    running += results[i].SizeInBytes;
+                    if (running > options.MaxTotalSizeBytes.Value) { cutoff = i; break; }
+                }
+                if (cutoff < results.Count)
+                {
+                    results = results.Take(cutoff).ToList();
+                    progress?.Report($"Total-size cap reached: keeping {cutoff} file(s).");
+                }
+            }
+
+            if (options.MaxFileCount.HasValue && results.Count > options.MaxFileCount.Value)
+            {
+                results = results.Take(options.MaxFileCount.Value).ToList();
+                progress?.Report($"File-count cap reached: keeping {options.MaxFileCount.Value} file(s).");
+            }
+
             return results;
         }
 
@@ -440,28 +463,33 @@ namespace FetchLog.Services
 
                 try
                 {
+                    // Apply prefix/suffix rename (#16)
+                    var baseName = Path.GetFileNameWithoutExtension(result.FileName);
+                    var fileExt = Path.GetExtension(result.FileName);
+                    var renamedName = (!string.IsNullOrEmpty(options.RenamePrefix) || !string.IsNullOrEmpty(options.RenameSuffix))
+                        ? $"{options.RenamePrefix}{baseName}{options.RenameSuffix}{fileExt}"
+                        : result.FileName;
+
                     string destPath;
 
                     if (options.PreserveStructure && !string.IsNullOrEmpty(result.SearchRootDirectory))
                     {
-                        // Mirror the source directory tree under outputPath
-                        var relativePath = Path.GetRelativePath(result.SearchRootDirectory, result.SourcePath);
-                        destPath = Path.Combine(outputPath, relativePath);
+                        // Mirror the source directory tree under outputPath, but apply rename to filename
+                        var relDir = Path.GetDirectoryName(
+                            Path.GetRelativePath(result.SearchRootDirectory, result.SourcePath)) ?? "";
+                        destPath = Path.Combine(outputPath, relDir, renamedName);
                         Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
                     }
                     else
                     {
                         // Flat copy — handle duplicate file names
-                        var destFileName = result.FileName;
-                        destPath = Path.Combine(outputPath, destFileName);
+                        destPath = Path.Combine(outputPath, renamedName);
                         int counter = 1;
                         while (File.Exists(destPath))
                         {
-                            var nameWithoutExt = Path.GetFileNameWithoutExtension(result.FileName);
-                            var extension = Path.GetExtension(result.FileName);
-                            destFileName = $"{nameWithoutExt}_{counter}{extension}";
-                            destPath = Path.Combine(outputPath, destFileName);
-                            counter++;
+                            var nameWithoutExt = Path.GetFileNameWithoutExtension(renamedName);
+                            var extension = Path.GetExtension(renamedName);
+                            destPath = Path.Combine(outputPath, $"{nameWithoutExt}_{counter++}{extension}");
                         }
                     }
 
@@ -500,22 +528,31 @@ namespace FetchLog.Services
 
                         try
                         {
+                            // Apply prefix/suffix rename (#16)
+                            var baseName = Path.GetFileNameWithoutExtension(result.FileName);
+                            var fileExt = Path.GetExtension(result.FileName);
+                            var renamedName = (!string.IsNullOrEmpty(options.RenamePrefix) || !string.IsNullOrEmpty(options.RenameSuffix))
+                                ? $"{options.RenamePrefix}{baseName}{options.RenameSuffix}{fileExt}"
+                                : result.FileName;
+
                             string entryName;
 
                             if (options.PreserveStructure && !string.IsNullOrEmpty(result.SearchRootDirectory))
                             {
-                                // Use the relative path as the ZIP entry (preserves folder tree inside archive)
-                                entryName = Path.GetRelativePath(result.SearchRootDirectory, result.SourcePath)
-                                               .Replace('\\', '/');
+                                // Use the relative path as the ZIP entry, applying rename to the filename
+                                var relDir = Path.GetDirectoryName(
+                                    Path.GetRelativePath(result.SearchRootDirectory, result.SourcePath)) ?? "";
+                                entryName = (string.IsNullOrEmpty(relDir) ? renamedName
+                                    : $"{relDir.Replace('\\', '/')}/{renamedName}");
                             }
                             else
                             {
-                                entryName = result.FileName;
+                                entryName = renamedName;
                                 if (existingNames.Contains(entryName))
                                 {
                                     int counter = 1;
-                                    var ext = Path.GetExtension(result.FileName);
-                                    var nameNoExt = Path.GetFileNameWithoutExtension(result.FileName);
+                                    var ext = Path.GetExtension(renamedName);
+                                    var nameNoExt = Path.GetFileNameWithoutExtension(renamedName);
                                     do { entryName = $"{nameNoExt}_{counter++}{ext}"; }
                                     while (existingNames.Contains(entryName));
                                 }
