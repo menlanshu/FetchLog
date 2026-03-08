@@ -12,7 +12,6 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
-using System.Windows.Forms;
 using System.Windows.Input;
 using FetchLog.Models;
 using FetchLog.Services;
@@ -60,7 +59,7 @@ namespace FetchLog
 
         private void BtnAddDirectory_Click(object sender, RoutedEventArgs e)
         {
-            using (var dialog = new FolderBrowserDialog())
+            using (var dialog = new System.Windows.Forms.FolderBrowserDialog())
             {
                 dialog.Description = "Select a directory to search";
                 dialog.ShowNewFolderButton = false;
@@ -112,7 +111,7 @@ namespace FetchLog
 
         private void BtnBrowseOutput_Click(object sender, RoutedEventArgs e)
         {
-            using (var dialog = new FolderBrowserDialog())
+            using (var dialog = new System.Windows.Forms.FolderBrowserDialog())
             {
                 dialog.Description = "Select output directory for search results";
                 dialog.ShowNewFolderButton = true;
@@ -496,6 +495,8 @@ namespace FetchLog
 
         private void ApplyGrouping(int groupIndex)
         {
+            if (lvResults?.ItemsSource == null) return;
+
             var view = CollectionViewSource.GetDefaultView(lvResults.ItemsSource);
             if (view == null) return;
 
@@ -526,7 +527,7 @@ namespace FetchLog
                 return;
             }
 
-            using (var dialog = new SaveFileDialog())
+            using (var dialog = new System.Windows.Forms.SaveFileDialog())
             {
                 dialog.Filter = "CSV file (*.csv)|*.csv|HTML file (*.html)|*.html";
                 dialog.FileName = $"FetchLog_Results_{DateTime.Now:yyyyMMdd_HHmmss}";
@@ -563,7 +564,7 @@ namespace FetchLog
 
         private async void BtnSaveProfile_Click(object sender, RoutedEventArgs e)
         {
-            using (var dialog = new SaveFileDialog())
+            using (var dialog = new System.Windows.Forms.SaveFileDialog())
             {
                 dialog.Filter = "FetchLog Profile (*.json)|*.json";
                 dialog.InitialDirectory = _profileService.ProfilesDirectory;
@@ -588,7 +589,7 @@ namespace FetchLog
 
         private async void BtnLoadProfile_Click(object sender, RoutedEventArgs e)
         {
-            using (var dialog = new OpenFileDialog())
+            using (var dialog = new System.Windows.Forms.OpenFileDialog())
             {
                 dialog.Filter = "FetchLog Profile (*.json)|*.json";
                 dialog.InitialDirectory = _profileService.ProfilesDirectory;

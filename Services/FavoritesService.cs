@@ -30,7 +30,7 @@ namespace FetchLog.Services
         public async Task AddAsync(string directory)
         {
             var favorites = await LoadAsync();
-            if (!favorites.Contains(directory, StringComparer.OrdinalIgnoreCase))
+            if (!favorites.Contains(directory))
             {
                 favorites.Add(directory);
                 await SaveAsync(favorites);
