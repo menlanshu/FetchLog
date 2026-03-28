@@ -1005,7 +1005,8 @@ namespace FetchLog
                 return;
 
             // Map column header text to the correct sortable property name
-            var sortProperty = header.Content?.ToString() switch
+            var headerText = header.Content?.ToString()?.TrimEnd(' ', '▲', '▼') ?? "";
+            var sortProperty = headerText switch
             {
                 "File Name"   => "FileName",
                 "Source Path" => "SourcePath",
