@@ -797,6 +797,11 @@ namespace FetchLog
             chkRename.IsChecked = hasRename;
             txtRenamePrefix.Text = options.RenamePrefix;
             txtRenameSuffix.Text = options.RenameSuffix;
+
+            // Auto-expand collapsed sections if the loaded profile uses advanced features
+            expAdvancedFilters.IsExpanded = hasDate || hasSize || hasCap || hasRename;
+            expAdvancedOptions.IsExpanded = options.MultilineSearch || options.PreserveStructure
+                || options.DetectDuplicates || options.ShowFileHash || options.DetectLogFormat;
         }
 
         private static (double value, int unitIndex) BytesToDisplayUnit(long bytes)
@@ -913,6 +918,12 @@ namespace FetchLog
             bool renameEnabled = !isSearching && (chkRename.IsChecked == true);
             txtRenamePrefix.IsEnabled = renameEnabled;
             txtRenameSuffix.IsEnabled = renameEnabled;
+
+            // Expanders
+            expFavorites.IsEnabled = !isSearching;
+            expAdvancedFilters.IsEnabled = !isSearching;
+            expAdvancedOptions.IsEnabled = !isSearching;
+            expProfilesHistory.IsEnabled = !isSearching;
         }
 
         // ── Double-click to open file ─────────────────────────────────────────
@@ -1005,7 +1016,8 @@ namespace FetchLog
                 return;
 
             // Map column header text to the correct sortable property name
-            var sortProperty = header.Content?.ToString() switch
+            var headerText = header.Content?.ToString()?.TrimEnd(' ', '▲', '▼') ?? "";
+            var sortProperty = headerText switch
             {
                 "File Name"   => "FileName",
                 "Source Path" => "SourcePath",

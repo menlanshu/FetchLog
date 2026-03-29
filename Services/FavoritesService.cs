@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 
@@ -30,7 +31,7 @@ namespace FetchLog.Services
         public async Task AddAsync(string directory)
         {
             var favorites = await LoadAsync();
-            if (!favorites.Contains(directory))
+            if (!favorites.Any(f => string.Equals(f, directory, StringComparison.OrdinalIgnoreCase)))
             {
                 favorites.Add(directory);
                 await SaveAsync(favorites);

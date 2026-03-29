@@ -336,8 +336,14 @@ namespace FetchLog.Services
                     using var stream = entry.Open();
                     using var reader = new StreamReader(stream);
                     var content = await reader.ReadToEndAsync();
-                    if (IsContentMatch(content, options.ContentFilter, options.CaseSensitive, options.UseRegex))
-                        matches.Add(entry.FullName);
+                    if (!IsContentMatch(content, options.ContentFilter, options.CaseSensitive, options.UseRegex, options.MultilineSearch))
+                        continue;
+                    if (options.MinMatchCount.HasValue)
+                    {
+                        int count = CountContentMatches(content, options.ContentFilter, options.CaseSensitive, options.UseRegex, options.MultilineSearch);
+                        if (count < options.MinMatchCount.Value) continue;
+                    }
+                    matches.Add(entry.FullName);
                 }
                 else
                 {
@@ -366,8 +372,14 @@ namespace FetchLog.Services
                     using var stream = entry.OpenEntryStream();
                     using var reader = new StreamReader(stream);
                     var content = await reader.ReadToEndAsync();
-                    if (IsContentMatch(content, options.ContentFilter, options.CaseSensitive, options.UseRegex))
-                        matches.Add(entry.Key!);
+                    if (!IsContentMatch(content, options.ContentFilter, options.CaseSensitive, options.UseRegex, options.MultilineSearch))
+                        continue;
+                    if (options.MinMatchCount.HasValue)
+                    {
+                        int count = CountContentMatches(content, options.ContentFilter, options.CaseSensitive, options.UseRegex, options.MultilineSearch);
+                        if (count < options.MinMatchCount.Value) continue;
+                    }
+                    matches.Add(entry.Key!);
                 }
                 else
                 {
@@ -428,19 +440,43 @@ namespace FetchLog.Services
             return Regex.IsMatch(fileName, regexPattern, RegexOptions.IgnoreCase);
         }
 
-        private static bool IsContentMatch(string content, string pattern, bool caseSensitive, bool useRegex)
+        private static bool IsContentMatch(string content, string pattern, bool caseSensitive, bool useRegex, bool multiline = false)
         {
             try
             {
                 if (useRegex)
                 {
                     var opts = caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase;
+                    if (multiline) opts |= RegexOptions.Singleline;
                     return Regex.IsMatch(content, pattern, opts);
                 }
                 var comp = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
                 return content.Contains(pattern, comp);
             }
             catch { return false; }
+        }
+
+        private static int CountContentMatches(string content, string pattern, bool caseSensitive, bool useRegex, bool multiline = false)
+        {
+            try
+            {
+                if (useRegex)
+                {
+                    var opts = caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase;
+                    if (multiline) opts |= RegexOptions.Singleline;
+                    return Regex.Matches(content, pattern, opts).Count;
+                }
+                var comp = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+                int count = 0;
+                int idx = 0;
+                while ((idx = content.IndexOf(pattern, idx, comp)) >= 0)
+                {
+                    count++;
+                    idx += pattern.Length;
+                }
+                return count;
+            }
+            catch { return 0; }
         }
 
         private static bool IsBinaryFile(string filePath)
@@ -460,7 +496,7 @@ namespace FetchLog.Services
                 var buf = new byte[512];
                 int read = file.Read(buf, 0, buf.Length);
                 for (int i = 0; i < read; i++)
-                    if (buf[i] == 0 || (buf[i] < 9 && buf[i] != 0)) return true;
+                    if (buf[i] < 9) return true;
             }
             catch { return true; }
             return false;
@@ -493,6 +529,13 @@ namespace FetchLog.Services
                         var relDir = Path.GetDirectoryName(
                             Path.GetRelativePath(result.SearchRootDirectory, result.SourcePath)) ?? "";
                         destPath = Path.Combine(outputPath, relDir, renamedName);
+                        int counter = 1;
+                        while (File.Exists(destPath))
+                        {
+                            var n = Path.GetFileNameWithoutExtension(renamedName);
+                            var ext = Path.GetExtension(renamedName);
+                            destPath = Path.Combine(outputPath, relDir, $"{n}_{counter++}{ext}");
+                        }
                         Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
                     }
                     else
